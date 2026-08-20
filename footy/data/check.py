@@ -26,6 +26,7 @@ from footy.config import (
     OVERROUND_MIN,
     season_label,
 )
+from footy.data.known_anomalies import apply_known_anomalies
 from footy.data.teams import canonical_team, canonical_team_j1, near_duplicate_keys
 
 MATCHES_PER_SEASON = 380
@@ -381,6 +382,19 @@ def run_checks_j1(matches: pd.DataFrame) -> CheckResult:
     result.stats["rows"] = int(len(matches))
     result.stats["seasons"] = int(matches["season"].nunique())
 
+    # Known single-row source anomalies (footy/data/known_anomalies.py) are
+    # excluded *before* judging the overround bands, and every application is
+    # reported below -- the bands themselves stay untouched, so a genuine
+    # parse regression still fails exactly as before.
+    matches, applied = apply_known_anomalies(matches)
+    result.stats["known_anomalies_applied"] = len(applied)
+    for entry in applied:
+        result.note(
+            f"known data anomaly excluded ({entry['n_rows']} row(s)): "
+            f"{entry['date']} {entry['home_team']} v {entry['away_team']} "
+            f"[{', '.join(entry['columns'])} -> NaN] -- {entry['reason']}"
+        )
+
     _check_unknown_teams_j1(matches, result)
     _check_j1_season_shape(matches, result)
     _check_results(matches, result)
@@ -446,6 +460,11 @@ def format_result(result: CheckResult) -> str:
                 lines.append(
                     f"    {row.season_label}  {row.psc_missing:>3}/{row.rows}"
                 )
+    if "known_anomalies_applied" in s:
+        lines.append(
+            f"  known anomalies {s['known_anomalies_applied']} excluded "
+            "(breakdown in notes)"
+        )
     for note in result.notes:
         lines.append(f"  note: {note}")
     for problem in result.problems:

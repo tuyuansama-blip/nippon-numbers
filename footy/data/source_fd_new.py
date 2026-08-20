@@ -167,6 +167,12 @@ def build_j1_matches(raw_dir=None, *, fetcher=None) -> pd.DataFrame:
     path = fetch_jpn_csv(root, fetcher=fetcher)
     raw = read_raw_jpn(path)
     frame = normalise_jpn(raw)
+    # Known single-row source anomalies are dropped column-wise here, at load
+    # time, never by editing the raw CSV (a re-fetch would overwrite it) --
+    # see footy/data/known_anomalies.py for the list, each with its reason.
+    from footy.data.known_anomalies import apply_known_anomalies
+
+    frame, _ = apply_known_anomalies(frame)
     return frame.sort_values(
         ["date", "home_team", "away_team"], kind="mergesort"
     ).reset_index(drop=True)
