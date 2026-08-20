@@ -35,7 +35,7 @@ from footy.config import (
     RAW_DIR,
     season_label,
 )
-from footy.data.teams import canonical_team, league_id, team_id
+from footy.data.teams import league_id, resolve_team
 
 # Source column -> parquet column. Anything not listed is dropped.
 _NUMERIC = ("fthg", "ftag", "hthg", "htag", "psch", "pscd", "psca")
@@ -56,12 +56,15 @@ _WANTED = {
     "PSCA": "psca",
 }
 
+# `bfech/bfecd/bfeca` (Betfair exchange close) are reserved for J1 2024- --
+# the mmz4281 files (E0 and the 15 OOS-LEAGUES divisions) never populate them
+# (DESIGN_PHASE2.md 6.1), same all-NaN-reservation discipline as xg_home.
 COLUMNS = [
     "match_id", "div", "league_id", "season", "season_label",
     "date", "time", "week_start",
     "home_team", "away_team", "home_id", "away_id",
     "fthg", "ftag", "ftr", "hthg", "htag", "htr",
-    "psch", "pscd", "psca",
+    "psch", "pscd", "psca", "bfech", "bfecd", "bfeca",
     "xg_home", "xg_away",
     "empty_crowd",
 ]
@@ -141,19 +144,25 @@ def normalise(frame: pd.DataFrame, season: int) -> pd.DataFrame:
     out["season"] = int(season)
     out["season_label"] = season_label(int(season))
 
+    div_value = str(out["div"].iloc[0]) if len(out) else "E0"
     for side in ("home", "away"):
         raw = out[f"{side}_team_raw"].astype("string").str.strip()
-        out[f"{side}_team"] = raw.map(
-            lambda name: canonical_team(name) if pd.notna(name) else pd.NA
+        resolved = raw.map(
+            lambda name: resolve_team(div_value, name) if pd.notna(name)
+            else (pd.NA, pd.NA)
         )
-        out[f"{side}_id"] = raw.map(
-            lambda name: team_id(name) if pd.notna(name) else pd.NA
-        )
+        out[f"{side}_team"] = [c for c, _ in resolved]
+        out[f"{side}_id"] = [i for _, i in resolved]
         # Unknown spellings survive into the frame so `footy check` can name
-        # them; they are never silently renamed.
+        # them; they are never silently renamed. (Non-E0/JPN1 divisions
+        # auto-register and never come back unresolved -- DESIGN_PHASE2.md 5.4.)
         out[f"{side}_team"] = out[f"{side}_team"].fillna(raw)
         out[f"{side}_id"] = out[f"{side}_id"].fillna(pd.NA)
     out = out.drop(columns=["home_team_raw", "away_team_raw"])
+
+    out["bfech"] = np.nan
+    out["bfecd"] = np.nan
+    out["bfeca"] = np.nan
 
     # Monday of the match's week. This single definition is both the
     # bootstrap block (DESIGN.md 2.5) and the `--refit week` fold boundary,
@@ -187,8 +196,16 @@ def build_matches(
     divs=DEFAULT_DIVS,
     out_path: Path | str | None = None,
     write: bool = True,
+    extra_frames=(),
 ) -> pd.DataFrame:
-    """Every cached season -> one sorted frame, optionally written to parquet."""
+    """Every cached season -> one sorted frame, optionally written to parquet.
+
+    `extra_frames` lets a division with its own loader (J1's `new/JPN.csv`,
+    which is one file for 2012-present rather than one mmz4281 file per
+    season) join the same `matches.parquet` without this function knowing
+    anything about how it was produced -- it only has to already be in the
+    unified schema (DESIGN_PHASE2.md 6, 10).
+    """
     root = Path(raw_dir) if raw_dir else RAW_DIR
     frames = []
     for div in divs:
@@ -198,6 +215,7 @@ def build_matches(
             if raw.empty:
                 continue
             frames.append(normalise(raw, season))
+    frames.extend(f for f in extra_frames if f is not None and not f.empty)
     if not frames:
         raise FileNotFoundError(f"no raw CSVs for {list(divs)} under {root}")
 

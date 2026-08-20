@@ -25,6 +25,9 @@ import pandas as pd
 
 from footy.config import (
     AUDIT_MARGIN,
+    CAL1_SPAN_FRACTION,
+    CAL2_MAX_DEV,
+    CAL2_MIN_BIN_N,
     CALIB_MAX_DEV,
     CALIB_MIN_BIN_N,
     CI_UPPER_MAX,
@@ -33,6 +36,11 @@ from footy.config import (
     GAP_PASS,
     GAP_STRONG,
     GAP_WARN,
+    J1_LL_FRAC,
+    J1_PASS_CI_FRAC,
+    J1_PASS_FRAC,
+    J1_STRONG_FRAC,
+    J1_WARN_FRAC,
     REPORTS_DIR,
     SE_MAX,
     season_label,
@@ -43,7 +51,11 @@ from footy.eval.metrics import (
     draw_check,
     gap_closed,
     logloss_array,
+    market_decile_expected_band,
     market_decile_table,
+    murphy_decomposition,
+    null_calibration_bootstrap,
+    own_decile_table,
     rps_array,
 )
 
@@ -79,6 +91,11 @@ class Evaluation:
     reasons: list[str] = field(default_factory=list)
     checks: dict = field(default_factory=dict)
     primary: str = "dc"
+    # Phase 2 (DESIGN_PHASE2.md 3): populated only by `evaluate_v2`.
+    murphy: dict | None = None
+    own_deciles: pd.DataFrame | None = None
+    null_band: dict | None = None
+    market_band: dict | None = None
 
 
 def _score_rows(probs: dict, y, blocks, label_map=None) -> pd.DataFrame:
@@ -592,4 +609,409 @@ def write_report(ev: Evaluation, reports_dir: Path | str | None = None) -> Path:
 
     path = root / f"backtest_{ev.run_id}.md"
     path.write_text("\n".join(lines), encoding="utf-8")
+    return path
+
+
+# ==============================================================================
+# Phase 2 (DESIGN_PHASE2.md 3, 7.3). `evaluate_v2` reuses every number
+# `evaluate` already computed -- scores, paired differences, gap_closed,
+# by-season/crowd diagnostics -- and replaces only the two things §2 found
+# wrong: the market-decile calibration gate becomes CAL-1..4, and (J1 only)
+# the gap_closed verdict scale becomes an absolute paired-difference scale
+# measured against J1's own span (§7.3), because gap_closed's denominator is
+# too small there for its own CI to resolve the 0.60 threshold (§7.3, §11-2).
+#
+# `evaluate`/`_judge`/`verdict_block`/`write_report` above are untouched: the
+# EPL TEST leg in DESIGN.md is v1's, on the record, unmodified.
+# ==============================================================================
+
+
+def _calibration_v2(ev: "Evaluation", result, primary: str) -> dict:
+    """CAL-1..4 (DESIGN_PHASE2.md 3.1): Murphy decomposition + own-decile
+    table + the null bootstrap that sets CAL-1's floor, all computed once and
+    hung off `ev` so both judging and rendering can reuse them."""
+    has_market = result.has_market
+    y = result.y[has_market]
+    model_probs = result.probs[primary][has_market]
+    market_probs = result.market("shin")[has_market]
+
+    murphy_model = murphy_decomposition(model_probs, y)
+    murphy_market = murphy_decomposition(market_probs, y)
+    murphy_clim = (
+        murphy_decomposition(result.probs["clim"][has_market], y)
+        if "clim" in result.probs else None
+    )
+    ev.murphy = {"model": murphy_model, "market": murphy_market, "clim": murphy_clim}
+
+    own_deciles = own_decile_table(model_probs, y)
+    ev.own_deciles = own_deciles
+    null_band = null_calibration_bootstrap(model_probs)
+    ev.null_band = null_band
+
+    brier_span = (
+        murphy_clim["brier"] - murphy_market["brier"]
+        if murphy_clim is not None else float("nan")
+    )
+    cal1_threshold = null_band["reliability_debiased_p99"]
+    if np.isfinite(brier_span):
+        cal1_threshold = max(CAL1_SPAN_FRACTION * brier_span, cal1_threshold)
+    cal1_value = murphy_model["reliability_debiased"]
+    cal1_ok = bool(np.isfinite(cal1_value) and cal1_value <= cal1_threshold)
+
+    wide = own_deciles[own_deciles["n"] >= CAL2_MIN_BIN_N] if len(own_deciles) else own_deciles
+    cal2_worst = float(wide["gap"].abs().max()) if len(wide) else float("nan")
+    cal2_ok = bool(len(wide)) and cal2_worst <= CAL2_MAX_DEV
+
+    row = ev.paired[ev.paired["model"] == primary]
+    row = row.iloc[0] if len(row) else None
+    cal3_ok = bool(np.isfinite(ev.draws["gap"]) and abs(ev.draws["gap"]) <= DRAW_MAX_DEV)
+    cal4_ok = bool(row is not None and float(row["d_rps_se"]) <= SE_MAX)
+
+    checks = {
+        "brier_span": brier_span,
+        "cal1_reliability_debiased": cal1_value,
+        "cal1_threshold": cal1_threshold,
+        "cal1_ok": cal1_ok,
+        "cal2_own_decile_worst_gap": cal2_worst,
+        "cal2_bins_used": int(len(wide)),
+        "cal2_ok": cal2_ok,
+        "cal3_draw_gap": ev.draws["gap"],
+        "cal3_ok": cal3_ok,
+        "cal4_se": float(row["d_rps_se"]) if row is not None else float("nan"),
+        "cal4_ok": cal4_ok,
+        "calibration_ok": bool(cal1_ok and cal2_ok and cal3_ok and cal4_ok),
+    }
+
+    # Diagnostic only (DESIGN_PHASE2.md 3.2): the band a perfectly-honest
+    # forecaster of this run's own resolution would show on the (demoted)
+    # market-decile table.
+    ev.market_band = None
+    gap_rps = ev.gaps.get("rps", float("nan"))
+    if np.isfinite(gap_rps) and "clim" in result.probs:
+        ev.market_band = market_decile_expected_band(
+            market_probs, y,
+            clim_score=ev.gaps["rps_clim"], market_score=ev.gaps["rps_market"],
+            target_gap_closed=gap_rps,
+        )
+    return checks
+
+
+def evaluate_v2(
+    result, *, primary: str = "dc", run_id: str | None = None,
+    league_mode: str = "gap",
+) -> Evaluation:
+    """`evaluate` plus the phase-2 calibration axis and (optionally) the J1
+    absolute-difference verdict scale (DESIGN_PHASE2.md 3, 7.3).
+
+    `league_mode="gap"` -- EPL TEST re-score and OOS-LEAGUES: gap_closed
+    stays the judging scale exactly as DESIGN.md 3 fixed it, only CAL-1..4
+    replace the market-decile gate.
+    `league_mode="absolute"` -- J1: the verdict scale itself changes to
+    absolute paired RPS/LL differences against J1's own measured span,
+    because gap_closed's denominator is 42% of EPL's and its CI cannot
+    resolve 0.60 there (DESIGN_PHASE2.md 7.3, 11-2).
+    """
+    ev = evaluate(result, primary=primary, run_id=run_id)
+    cal = _calibration_v2(ev, result, primary)
+    ev.checks.update(cal)
+
+    row = ev.paired[ev.paired["model"] == primary].iloc[0]
+    if league_mode == "absolute":
+        _judge_j1(ev, result, primary, row, cal["calibration_ok"])
+    else:
+        _judge_gap_v2(ev, row, cal["calibration_ok"])
+    return ev
+
+
+def _judge_gap_v2(ev: "Evaluation", row, calibration_ok: bool) -> None:
+    """DESIGN.md 3's gap_closed scale, unchanged (DESIGN_PHASE2.md 3.3),
+    with the market-decile/draw/SE gate replaced by CAL-1..4."""
+    gap_rps = ev.gaps.get("rps", float("nan"))
+    gap_ll = ev.gaps.get("logloss", float("nan"))
+    ev.checks["gap_closed_rps"] = gap_rps
+    ev.checks["gap_closed_logloss"] = gap_ll
+    ev.checks["d_rps"] = float(row["d_rps"])
+    ev.checks["d_rps_lo"] = float(row["d_rps_lo"])
+    ev.checks["d_rps_hi"] = float(row["d_rps_hi"])
+    ev.checks["ci_upper_ok"] = bool(float(row["d_rps_hi"]) <= CI_UPPER_MAX)
+
+    beats_by = -float(row["d_rps"])
+    if beats_by > AUDIT_MARGIN and float(row["d_rps_hi"]) < 0.0:
+        ev.verdict = "FAIL-AUDIT"
+        ev.reasons = [
+            f"model beats the market by {beats_by:.4f} RPS with a 95% CI "
+            f"entirely below zero ([{row['d_rps_lo']:.4f}, "
+            f"{row['d_rps_hi']:.4f}]). Treat as a leak until audited, not as "
+            "a result (DESIGN.md 3, unchanged by phase 2)."
+        ]
+        return
+
+    if not calibration_ok:
+        ev.verdict = "FAIL"
+        ev.reasons = [
+            "calibration v2 (CAL-1..4, DESIGN_PHASE2.md 3.1) failed; the "
+            f"gap it overrides is gap_closed(RPS)={gap_rps:.3f}"
+        ]
+        c = ev.checks
+        if not c["cal1_ok"]:
+            ev.reasons.append(
+                f"CAL-1: reliability(debiased)={c['cal1_reliability_debiased']:.6f} "
+                f"> threshold {c['cal1_threshold']:.6f}"
+            )
+        if not c["cal2_ok"]:
+            ev.reasons.append(
+                f"CAL-2: own-decile worst |gap|={c['cal2_own_decile_worst_gap']:.4f} "
+                f"> {CAL2_MAX_DEV} ({c['cal2_bins_used']} bins with n>={CAL2_MIN_BIN_N})"
+            )
+        if not c["cal3_ok"]:
+            ev.reasons.append(
+                f"CAL-3: draw gap {c['cal3_draw_gap']:+.4f} outside +/-{DRAW_MAX_DEV}"
+            )
+        if not c["cal4_ok"]:
+            ev.reasons.append(f"CAL-4: bootstrap SE {c['cal4_se']:.4f} > {SE_MAX}")
+        return
+
+    if gap_rps >= GAP_STRONG:
+        ev.verdict = "STRONG"
+        ev.reasons = [f"gap_closed(RPS) = {gap_rps:.3f} >= {GAP_STRONG}"]
+        return
+    if gap_rps >= GAP_PASS and float(row["d_rps_hi"]) <= CI_UPPER_MAX and gap_ll >= GAP_LL_PASS:
+        ev.verdict = "PASS"
+        ev.reasons = [
+            f"gap_closed(RPS) = {gap_rps:.3f} >= {GAP_PASS}, CI upper "
+            f"{row['d_rps_hi']:.4f} <= {CI_UPPER_MAX}, gap_closed(LL) = "
+            f"{gap_ll:.3f} >= {GAP_LL_PASS}, calibration v2 ok"
+        ]
+        return
+    if gap_rps >= GAP_WARN:
+        ev.verdict = "WARN"
+        ev.reasons = [
+            f"gap_closed(RPS) = {gap_rps:.3f} is in [{GAP_WARN}, {GAP_PASS})"
+        ]
+        return
+    ev.verdict = "FAIL"
+    ev.reasons = [f"gap_closed(RPS) = {gap_rps:.3f} < {GAP_WARN}"]
+
+
+def _judge_j1(ev: "Evaluation", result, primary: str, row, calibration_ok: bool) -> None:
+    """DESIGN_PHASE2.md 7.3: absolute paired differences against J1's own
+    measured span, not gap_closed. The ratios (0.25/0.40/0.55/0.60) are the
+    same numbers as DESIGN.md 3's gap_closed table (0.75/0.60/.../0.60)
+    applied to J1's span instead of EPL's -- fixed in `footy/config.py`
+    before this run, never chosen after seeing J1's own result."""
+    has_market = result.has_market
+    y = result.y[has_market]
+    rps_span = ev.gaps.get("rps_clim", float("nan")) - ev.gaps.get("rps_market", float("nan"))
+
+    ll_clim = (
+        float(np.mean(logloss_array(result.probs["clim"][has_market], y)))
+        if "clim" in result.probs else float("nan")
+    )
+    ll_market = float(np.mean(logloss_array(result.market("shin")[has_market], y)))
+    ll_span = ll_clim - ll_market
+    d_ll = float(row["d_logloss"])
+
+    d_rps = float(row["d_rps"])
+    d_rps_hi = float(row["d_rps_hi"])
+    strong_th = J1_STRONG_FRAC * rps_span
+    pass_th = J1_PASS_FRAC * rps_span
+    warn_th = J1_WARN_FRAC * rps_span
+    ci_th = J1_PASS_CI_FRAC * rps_span
+    ll_th = J1_LL_FRAC * ll_span
+
+    ev.checks.update({
+        "rps_span": rps_span,
+        "ll_span": ll_span,
+        "d_rps": d_rps,
+        "d_rps_lo": float(row["d_rps_lo"]),
+        "d_rps_hi": d_rps_hi,
+        "d_logloss": d_ll,
+        "j1_strong_threshold": strong_th,
+        "j1_pass_threshold": pass_th,
+        "j1_warn_threshold": warn_th,
+        "j1_ci_threshold": ci_th,
+        "j1_ll_threshold": ll_th,
+        "gap_closed_rps": ev.gaps.get("rps", float("nan")),
+        "gap_closed_logloss": ev.gaps.get("logloss", float("nan")),
+    })
+
+    beats_by = -d_rps
+    if beats_by > AUDIT_MARGIN and d_rps_hi < 0.0:
+        ev.verdict = "FAIL-AUDIT"
+        ev.reasons = [
+            f"model beats the market by {beats_by:.4f} RPS with a 95% CI "
+            f"entirely below zero. Treat as a leak, not a result."
+        ]
+        return
+
+    if not calibration_ok:
+        ev.verdict = "FAIL"
+        ev.reasons = ["calibration v2 (CAL-1..4) failed"]
+        c = ev.checks
+        if not c["cal1_ok"]:
+            ev.reasons.append(
+                f"CAL-1: reliability(debiased)={c['cal1_reliability_debiased']:.6f} "
+                f"> threshold {c['cal1_threshold']:.6f}"
+            )
+        if not c["cal2_ok"]:
+            ev.reasons.append(
+                f"CAL-2: own-decile worst |gap|={c['cal2_own_decile_worst_gap']:.4f} "
+                f"> {CAL2_MAX_DEV}"
+            )
+        if not c["cal3_ok"]:
+            ev.reasons.append(f"CAL-3: draw gap {c['cal3_draw_gap']:+.4f}")
+        if not c["cal4_ok"]:
+            ev.reasons.append(f"CAL-4: bootstrap SE {c['cal4_se']:.4f} > {SE_MAX}")
+        return
+
+    if d_rps <= strong_th:
+        ev.verdict = "STRONG"
+        ev.reasons = [f"d_RPS = {d_rps:+.4f} <= STRONG threshold {strong_th:.4f}"]
+        return
+    if d_rps <= pass_th and d_rps_hi <= ci_th and d_ll <= ll_th:
+        ev.verdict = "PASS"
+        ev.reasons = [
+            f"d_RPS = {d_rps:+.4f} <= {pass_th:.4f}, CI upper {d_rps_hi:.4f} "
+            f"<= {ci_th:.4f}, d_LL = {d_ll:+.4f} <= {ll_th:.4f}, "
+            "calibration v2 ok"
+        ]
+        return
+    if d_rps <= warn_th:
+        ev.verdict = "WARN"
+        ev.reasons = [f"d_RPS = {d_rps:+.4f} is in ({pass_th:.4f}, {warn_th:.4f}]"]
+        return
+    ev.verdict = "FAIL"
+    ev.reasons = [f"d_RPS = {d_rps:+.4f} > WARN threshold {warn_th:.4f}"]
+
+
+def verdict_block_v2(ev: "Evaluation", *, league_mode: str = "gap") -> str:
+    """The v2 `== 判定 ==` block: CAL-1..4 replace the market-decile line,
+    and (J1) absolute d_RPS/thresholds replace gap_closed as the headline."""
+    c = ev.checks
+    lines = ["== 判定 (v2) =="]
+    lines.append(f"  verdict         {ev.verdict}")
+    if league_mode == "absolute":
+        lines.append(
+            f"  d_RPS           {c.get('d_rps', float('nan')):+.4f} 95%CI "
+            f"[{c.get('d_rps_lo', float('nan')):+.4f}, "
+            f"{c.get('d_rps_hi', float('nan')):+.4f}]  span={c.get('rps_span', float('nan')):.4f}"
+        )
+        lines.append(
+            f"  thresholds      STRONG<={c.get('j1_strong_threshold', float('nan')):.4f}  "
+            f"PASS<={c.get('j1_pass_threshold', float('nan')):.4f}  "
+            f"CI<={c.get('j1_ci_threshold', float('nan')):.4f}  "
+            f"WARN<={c.get('j1_warn_threshold', float('nan')):.4f}"
+        )
+        lines.append(
+            f"  d_LL            {c.get('d_logloss', float('nan')):+.4f}  "
+            f"<= {c.get('j1_ll_threshold', float('nan')):.4f}"
+        )
+        lines.append(
+            f"  gap_closed RPS  {c.get('gap_closed_rps', float('nan')):.3f}  "
+            "(reported, not judged -- J1's span is too small for its CI, DESIGN_PHASE2.md 7.3)"
+        )
+    else:
+        lines.append(
+            f"  gap_closed RPS  {c.get('gap_closed_rps', float('nan')):.3f}   "
+            f"(STRONG >= {GAP_STRONG}, PASS >= {GAP_PASS}, WARN >= {GAP_WARN})"
+        )
+        lines.append(
+            f"  gap_closed LL   {c.get('gap_closed_logloss', float('nan')):.3f}"
+            f"   (PASS >= {GAP_LL_PASS})"
+        )
+        lines.append(
+            f"  paired d_RPS    {c.get('d_rps', float('nan')):+.4f} "
+            f"95%CI [{c.get('d_rps_lo', float('nan')):+.4f}, "
+            f"{c.get('d_rps_hi', float('nan')):+.4f}]"
+        )
+    lines.append(
+        f"  CAL-1 reliability(debiased) {c.get('cal1_reliability_debiased', float('nan')):.6f} "
+        f"<= {c.get('cal1_threshold', float('nan')):.6f}  "
+        f"[{'ok' if c.get('cal1_ok') else 'NG'}]"
+    )
+    lines.append(
+        f"  CAL-2 own-decile worst|gap| {c.get('cal2_own_decile_worst_gap', float('nan')):.4f} "
+        f"<= {CAL2_MAX_DEV}  ({c.get('cal2_bins_used', 0)} bins)  "
+        f"[{'ok' if c.get('cal2_ok') else 'NG'}]"
+    )
+    lines.append(
+        f"  CAL-3 draw gap  {c.get('cal3_draw_gap', float('nan')):+.4f} <= {DRAW_MAX_DEV}  "
+        f"[{'ok' if c.get('cal3_ok') else 'NG'}]"
+    )
+    lines.append(
+        f"  CAL-4 SE        {c.get('cal4_se', float('nan')):.4f} <= {SE_MAX}  "
+        f"[{'ok' if c.get('cal4_ok') else 'NG'}]"
+    )
+    lines.append(
+        f"  matches         {ev.n_scored:,} scored, {ev.n_market_missing:,} "
+        "without a close price"
+    )
+    for reason in ev.reasons:
+        lines.append(f"  -> {reason}")
+    return "\n".join(lines)
+
+
+def write_report_v2(
+    ev: "Evaluation", reports_dir=None, *, league_mode: str = "gap"
+) -> Path:
+    """`write_report`, with a Murphy-decomposition section, the CAL-1..4
+    table, the market-decile band diagnostic and the calibration-layer phi
+    time series appended (DESIGN_PHASE2.md 3.4, 4.4-CL3)."""
+    root = Path(reports_dir) if reports_dir else REPORTS_DIR
+    root.mkdir(parents=True, exist_ok=True)
+    path = write_report(ev, root)          # v1 body, unmodified
+
+    lines: list[str] = ["\n## フェーズ2 追補: 較正 v2\n"]
+    lines.append("```\n" + verdict_block_v2(ev, league_mode=league_mode) + "\n```\n")
+
+    lines.append("### Murphy 分解 (3アウトカム プール・等頻度20ビン)\n")
+    murphy_rows = []
+    for name, m in (ev.murphy or {}).items():
+        if m is None:
+            continue
+        murphy_rows.append({"leg": name, **m})
+    lines.append(_table(pd.DataFrame(murphy_rows), floats=6))
+    if ev.murphy and ev.murphy.get("model") and ev.murphy.get("market"):
+        d_brier = ev.murphy["model"]["brier"] - ev.murphy["market"]["brier"]
+        d_rel = ev.murphy["model"]["reliability_raw"] - ev.murphy["market"]["reliability_raw"]
+        d_res = ev.murphy["market"]["resolution"] - ev.murphy["model"]["resolution"]
+        lines.append(
+            f"\nmodel - market Brier差 **{d_brier:+.5f}**: 較正不良ぶん "
+            f"**{d_rel:+.5f}**、解像度不足ぶん **{d_res:+.5f}**（DESIGN_PHASE2.md 0.4 と同形式）\n"
+        )
+
+    lines.append("\n### 帰無分布ブートストラップ（完全較正な予測器, n_boot="
+                  f"{ev.null_band.get('n_boot', 0) if ev.null_band else 0}）\n")
+    if ev.null_band:
+        lines.append(_table(pd.DataFrame([ev.null_band]), floats=6))
+
+    lines.append("\n### CAL-2 自前確率デシル別\n")
+    lines.append(_table(ev.own_deciles))
+
+    lines.append("\n### 市場デシル表（診断のみ・判定に使わない）と期待帯\n")
+    lines.append(_table(ev.deciles))
+    if ev.market_band:
+        lines.append(
+            f"\n完全較正な予測器（gap_closed={ev.market_band['target_gap_closed']:.3f} "
+            f"相当の解像度, sd={ev.market_band['sd']:.3f}, "
+            f"{ev.market_band['n_seeds']} seeds）が示すはずの市場デシル最悪|gap|: "
+            f"**{ev.market_band['worst_gap_mean']:.4f} ± "
+            f"{ev.market_band['worst_gap_sd']:.4f}**\n\n"
+            f"_{ev.market_band['note']}_\n"
+        )
+
+    if ev.fits is not None and "cal_temperature" in ev.fits.columns:
+        lines.append("\n### 較正層 φ の時系列 (CL-3)\n")
+        phi = ev.fits[ev.fits["cal_temperature"].notna()]
+        cols = ["fold", "cal_n_history", "cal_warm", "cal_temperature",
+                "cal_phi_home", "cal_phi_draw"]
+        cols = [c for c in cols if c in phi.columns]
+        sample = phi[cols]
+        if len(sample) > 40:
+            step = max(1, len(sample) // 40)
+            sample = sample.iloc[::step]
+        lines.append(_table(sample, floats=4))
+
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write("\n".join(lines))
     return path

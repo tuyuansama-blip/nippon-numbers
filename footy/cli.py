@@ -39,17 +39,30 @@ def _season(text: str) -> int:
 def cmd_fetch(args) -> int:
     from footy.data.download import Fetcher, fetch_seasons
 
+    if args.league == "jpn1":
+        from footy.data.source_fd_new import fetch_jpn_csv
+
+        path = fetch_jpn_csv(args.raw_dir or None)
+        print(f"J1: {path}")
+        return 0
+
+    divs = tuple(args.divs)
+    if args.league == "oos":
+        from footy.config import OOS_DIVS
+
+        divs = OOS_DIVS
+
     if args.to < args.from_:
         print("error: --to is before --from", file=sys.stderr)
         return 2
     print(
         f"fetching {season_label(args.from_)} .. {season_label(args.to)} "
-        f"({', '.join(args.divs)}; interval >= {args.interval}s, serial)"
+        f"({', '.join(divs)}; interval >= {args.interval}s, serial)"
     )
     report = fetch_seasons(
         args.from_,
         args.to,
-        divs=tuple(args.divs),
+        divs=divs,
         fetcher=Fetcher(min_interval=args.interval),
         progress=lambda tag, note: print(f"  {tag:<12} {note}", flush=True),
     )
@@ -63,8 +76,25 @@ def cmd_build(args) -> int:
     from footy.config import MATCHES_PATH
     from footy.data.load import build_matches
 
-    matches = build_matches(divs=tuple(args.divs), out_path=args.out)
-    target = args.out or MATCHES_PATH
+    if args.league == "jpn1":
+        from footy.data.j1_filter import filter_regular_season
+        from footy.data.source_fd_new import build_j1_matches
+
+        matches = filter_regular_season(build_j1_matches(args.raw_dir or None))
+        target = args.out or (MATCHES_PATH.parent / "matches_jpn1.parquet")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        matches.to_parquet(target, index=False)
+    else:
+        divs = tuple(args.divs)
+        default_out = None
+        if args.league == "oos":
+            from footy.config import OOS_DIVS
+
+            divs = OOS_DIVS
+            default_out = MATCHES_PATH.parent / "matches_oos.parquet"
+        matches = build_matches(divs=divs, out_path=args.out or default_out)
+        target = args.out or default_out or MATCHES_PATH
+
     seasons = matches["season"].nunique()
     print(
         f"built {len(matches):,} matches over {seasons} seasons "
@@ -75,10 +105,24 @@ def cmd_build(args) -> int:
 
 
 def cmd_check(args) -> int:
-    from footy.data.check import format_result, run_checks
+    from footy.data.check import format_result, run_checks, run_checks_j1, run_checks_oos
+    from footy.data.j1_filter import filter_regular_season
     from footy.data.load import load_matches
 
-    result = run_checks(load_matches(args.matches))
+    if args.league == "oos":
+        from footy.config import OOS_DIVS
+
+        matches = load_matches(args.matches)
+        matches = matches[matches["div"].isin(OOS_DIVS)]
+        result = run_checks_oos(matches)
+    elif args.league == "jpn1":
+        from footy.config import JPN_DIV
+
+        matches = load_matches(args.matches)
+        matches = matches[matches["div"] == JPN_DIV]
+        result = run_checks_j1(filter_regular_season(matches))
+    else:
+        result = run_checks(load_matches(args.matches))
     print(format_result(result))
     return 0 if result.ok else 1
 
@@ -117,10 +161,17 @@ def cmd_tune(args) -> int:
 
 
 def cmd_backtest(args) -> int:
-    from footy.data.load import load_matches
     from footy.eval.report import evaluate, make_run_id, verdict_block, write_report
     from footy.eval.tune import load_frozen_params, model_params
     from footy.eval.walkforward import run_walkforward, save_run
+
+    if args.league in ("oos", "jpn1"):
+        return _cmd_backtest_v2(args)
+
+    from footy.data.load import load_matches
+
+    season_from = args.from_ if args.from_ is not None else TEST_START
+    season_to = args.to if args.to is not None else TEST_END
 
     matches = load_matches(args.matches)
     frozen = load_frozen_params(args.params)
@@ -131,7 +182,7 @@ def cmd_backtest(args) -> int:
     run_id = args.run_id or make_run_id(f"{args.model}_{args.refit}")
 
     print(
-        f"backtest {season_label(args.from_)} .. {season_label(args.to)} "
+        f"backtest {season_label(season_from)} .. {season_label(season_to)} "
         f"model={args.model} refit={args.refit}"
     )
     print(f"  params: {params}")
@@ -149,8 +200,8 @@ def cmd_backtest(args) -> int:
 
     result = run_walkforward(
         matches,
-        season_from=args.from_,
-        season_to=args.to,
+        season_from=season_from,
+        season_to=season_to,
         models=models,
         refit=args.refit,
         params=params,
@@ -170,16 +221,133 @@ def cmd_backtest(args) -> int:
     return 0
 
 
+def _cmd_backtest_v2(args) -> int:
+    """`--league oos|jpn1` (DESIGN_PHASE2.md 5, 7): calibration-v2 judging,
+    the OOS-LEAGUES per-division pooling, and J1's absolute-difference scale."""
+    import pandas as pd
+
+    from footy.eval.report import evaluate_v2, make_run_id, verdict_block_v2, write_report_v2
+    from footy.eval.tune import load_frozen_params
+    from footy.eval.walkforward import run_walkforward, save_run
+
+    frozen = load_frozen_params(args.params)
+    if not frozen:
+        print("error: data/frozen_params.json not found -- run `footy tune` first",
+              file=sys.stderr)
+        return 2
+
+    if args.league == "oos":
+        from footy.config import OOS_DIVS, TEST_END, TEST_START, TUNE_END, TUNE_START
+        from footy.eval.multileague import run_multileague_walkforward
+
+        matches_path = args.matches or "data/matches_oos.parquet"
+        matches = pd.read_parquet(matches_path)
+        season_from = args.from_ or TEST_START
+        season_to = args.to or TEST_END
+        run_id = args.run_id or make_run_id("oos_dc_cal")
+
+        def progress(div, number, total, row):
+            if number % args.every == 0 or number == total:
+                print(f"  {div:<4} {number:>4}/{total} {row['fold'].date()}", flush=True)
+
+        result = run_multileague_walkforward(
+            matches, OOS_DIVS, season_from=season_from, season_to=season_to,
+            pi_from=TUNE_START, pi_to=TUNE_END, frozen_params=frozen,
+            refit=args.refit, calibrate="tb", progress=progress,
+        )
+        league_mode = "gap"
+    else:
+        from footy.config import JPN_TEST_END, JPN_TEST_START
+
+        matches_path = args.matches or "data/matches_jpn1.parquet"
+        matches = pd.read_parquet(matches_path)
+        season_from = args.from_ or JPN_TEST_START
+        season_to = args.to or JPN_TEST_END
+        run_id = args.run_id or make_run_id("jpn1_dc_cal")
+
+        def progress(number, total, row):
+            if number % args.every == 0 or number == total:
+                print(f"  {number:>4}/{total} {row['fold']}", flush=True)
+
+        params = {
+            "half_life_days": frozen["half_life_days"], "sigma": frozen["sigma"],
+            "pi": (0.0, 0.0),   # pi_online (6.6) not implemented -- see report
+            "window_seasons": frozen.get("window_seasons", 6),
+        }
+        result = run_walkforward(
+            matches, season_from=season_from, season_to=season_to,
+            models=("dc", "clim"), refit=args.refit, params=params,
+            calibrate="tb", progress=progress,
+        )
+        league_mode = "absolute"
+
+    if not args.no_save:
+        save_run(result, run_id, args.reports_dir)
+
+    primary = args.model if args.model != "dc" else "dc_cal"
+    evaluation = evaluate_v2(result, primary=primary, run_id=run_id, league_mode=league_mode)
+    path = write_report_v2(evaluation, args.reports_dir, league_mode=league_mode)
+
+    print()
+    print(verdict_block_v2(evaluation, league_mode=league_mode))
+    print(f"\nreport: {path}")
+    print(f"run_id: {run_id}")
+    return 0
+
+
 def cmd_report(args) -> int:
-    from footy.eval.report import evaluate, verdict_block, write_report
     from footy.eval.walkforward import load_run
 
     result = load_run(args.run_id, args.reports_dir)
     primary = args.model or result.params.get("models", ["dc"])[0]
-    evaluation = evaluate(result, primary=primary, run_id=args.run_id)
-    path = write_report(evaluation, args.reports_dir)
-    print(verdict_block(evaluation))
+
+    if args.v2:
+        from footy.eval.report import evaluate_v2, verdict_block_v2, write_report_v2
+
+        evaluation = evaluate_v2(
+            result, primary=primary, run_id=args.run_id, league_mode=args.league_mode
+        )
+        path = write_report_v2(evaluation, args.reports_dir, league_mode=args.league_mode)
+        print(verdict_block_v2(evaluation, league_mode=args.league_mode))
+    else:
+        from footy.eval.report import evaluate, verdict_block, write_report
+
+        evaluation = evaluate(result, primary=primary, run_id=args.run_id)
+        path = write_report(evaluation, args.reports_dir)
+        print(verdict_block(evaluation))
     print(f"\nreport: {path}")
+    return 0
+
+
+def cmd_odds_ingest(args) -> int:
+    from footy.odds.ingest import ingest
+
+    frame = ingest(args.snapshot_dir, out_path=args.out)
+    print(f"odds_quotes: {len(frame):,} rows, {frame['event_id'].nunique()} events")
+    return 0
+
+
+def cmd_odds_close(args) -> int:
+    from footy.odds.close import write_close
+
+    path = write_close(args.quotes, args.out)
+    print(f"written: {path}")
+    return 0
+
+
+def cmd_odds_schedule(args) -> int:
+    import os
+
+    from footy.pipeline.odds_schedule import run_schedule
+
+    api_key = os.environ.get("ODDS_API_KEY")
+    if not api_key:
+        print("error: ODDS_API_KEY not set", file=sys.stderr)
+        return 2
+    written = run_schedule(
+        api_key, snapshot_dir=args.snapshot_dir, dry_run=args.dry_run
+    )
+    print(f"snapshots written: {written}")
     return 0
 
 
@@ -193,14 +361,19 @@ def build_parser() -> argparse.ArgumentParser:
     fetch.add_argument("--to", dest="to", type=_season, default=2025)
     fetch.add_argument("--divs", nargs="+", default=list(DEFAULT_DIVS))
     fetch.add_argument("--interval", type=float, default=MIN_INTERVAL_SEC)
+    fetch.add_argument("--league", choices=("e0", "oos", "jpn1"), default="e0")
+    fetch.add_argument("--raw-dir", dest="raw_dir", default=None)
     fetch.set_defaults(func=cmd_fetch)
 
     build = sub.add_parser("build", help="normalise raw CSVs -> matches.parquet")
     build.add_argument("--divs", nargs="+", default=list(DEFAULT_DIVS))
     build.add_argument("--out", default=None)
+    build.add_argument("--league", choices=("e0", "oos", "jpn1"), default="e0")
+    build.add_argument("--raw-dir", dest="raw_dir", default=None)
     build.set_defaults(func=cmd_build)
 
     check = sub.add_parser("check", help="integrity checks (exit 1 on a problem)")
+    check.add_argument("--league", choices=("e0", "oos", "jpn1"), default="e0")
     check.set_defaults(func=cmd_check)
 
     tune_cmd = sub.add_parser("tune", help="grid search xi, sigma, pi -> frozen JSON")
@@ -211,8 +384,8 @@ def build_parser() -> argparse.ArgumentParser:
     tune_cmd.set_defaults(func=cmd_tune)
 
     backtest = sub.add_parser("backtest", help="walk-forward evaluation")
-    backtest.add_argument("--from", dest="from_", type=_season, default=TEST_START)
-    backtest.add_argument("--to", dest="to", type=_season, default=TEST_END)
+    backtest.add_argument("--from", dest="from_", type=_season, default=None)
+    backtest.add_argument("--to", dest="to", type=_season, default=None)
     backtest.add_argument("--refit", choices=("date", "week"), default="date")
     backtest.add_argument("--model", choices=("dc", "poisson", "clim"), default="dc")
     backtest.add_argument("--params", default=None, help="frozen_params.json")
@@ -220,13 +393,37 @@ def build_parser() -> argparse.ArgumentParser:
     backtest.add_argument("--run-id", default=None)
     backtest.add_argument("--every", type=int, default=10, help="progress interval")
     backtest.add_argument("--no-save", action="store_true")
+    backtest.add_argument("--league", choices=("epl", "oos", "jpn1"), default="epl")
     backtest.set_defaults(func=cmd_backtest)
 
     report = sub.add_parser("report", help="re-render a saved run")
     report.add_argument("run_id")
     report.add_argument("--model", default=None)
     report.add_argument("--reports-dir", default=None)
+    report.add_argument("--v2", action="store_true",
+                         help="re-score with calibration v2 (DESIGN_PHASE2.md 3)")
+    report.add_argument("--league-mode", choices=("gap", "absolute"), default="gap")
     report.set_defaults(func=cmd_report)
+
+    odds = sub.add_parser("odds", help="J1 forward odds pipeline (DESIGN_PHASE2.md 8)")
+    odds_sub = odds.add_subparsers(dest="odds_command", required=True)
+
+    odds_ingest = odds_sub.add_parser("ingest", help="snapshots -> odds_quotes.parquet")
+    odds_ingest.add_argument("--snapshot-dir", dest="snapshot_dir", default=None)
+    odds_ingest.add_argument("--out", default=None)
+    odds_ingest.set_defaults(func=cmd_odds_ingest)
+
+    odds_close = odds_sub.add_parser("close", help="odds_quotes.parquet -> odds_close.parquet")
+    odds_close.add_argument("--quotes", default=None)
+    odds_close.add_argument("--out", default=None)
+    odds_close.set_defaults(func=cmd_odds_close)
+
+    odds_schedule = odds_sub.add_parser(
+        "schedule", help="kickoff-anchored collection pass (DESIGN_PHASE2.md 8.4)"
+    )
+    odds_schedule.add_argument("--snapshot-dir", dest="snapshot_dir", default=None)
+    odds_schedule.add_argument("--dry-run", action="store_true")
+    odds_schedule.set_defaults(func=cmd_odds_schedule)
     return parser
 
 

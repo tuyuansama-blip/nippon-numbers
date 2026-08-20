@@ -16,8 +16,17 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from footy.config import OVERROUND_MAX, OVERROUND_MIN, season_label
-from footy.data.teams import canonical_team
+from footy.config import (
+    JPN_OVERROUND_BFEC_MAX,
+    JPN_OVERROUND_BFEC_MIN,
+    JPN_OVERROUND_PSC_MAX,
+    JPN_OVERROUND_PSC_MIN,
+    OOS_MIN_APPEARANCES,
+    OVERROUND_MAX,
+    OVERROUND_MIN,
+    season_label,
+)
+from footy.data.teams import canonical_team, canonical_team_j1, near_duplicate_keys
 
 MATCHES_PER_SEASON = 380
 MATCHES_PER_TEAM = 38
@@ -211,6 +220,190 @@ def run_checks(matches: pd.DataFrame) -> CheckResult:
     if matches["xg_home"].notna().any():
         result.note("xg_home is no longer all-NaN -- an xG source was added")
     return result
+
+
+# ==============================================================================
+# Phase 2 (DESIGN_PHASE2.md 5.4, 6.7). Two more profiles: OOS-LEAGUES relaxes
+# the E0-specific checks that cannot hold across 15 divisions (a hand-curated
+# team whitelist, an exact 380-row season), J1 tightens back down to E0's
+# discipline with its own numbers (18/20-team seasons, two odds generations).
+# `run_checks` (above) is untouched and stays the default -- every existing
+# caller keeps its exact E0 behaviour.
+# ==============================================================================
+
+
+def _check_oos_teams(matches: pd.DataFrame, result: CheckResult) -> None:
+    """Non-E0 divisions auto-register (DESIGN_PHASE2.md 5.4): there is no
+    'unknown spelling' to fail on, only two warnings -- a likely spelling
+    split (near-duplicate keys within one season) and a club too rarely seen
+    to be a real top-flight side that season."""
+    by_group: dict[tuple, list] = {}
+    for (div, season), group in matches.groupby(["div", "season"], sort=True):
+        names = pd.concat([group["home_team"], group["away_team"]]).dropna()
+        by_group[(str(div), int(season))] = names.unique().tolist()
+    dups = near_duplicate_keys(by_group)
+    result.stats["near_duplicate_pairs"] = len(dups)
+    if dups:
+        sample = "; ".join(f"{s}:{a}~{b}" for s, a, b in dups[:10])
+        result.note(
+            f"{len(dups)} near-duplicate team-key pairs in the same season "
+            f"(likely one club auto-registered under two spellings): {sample}"
+        )
+
+    counts = pd.concat([matches["home_id"], matches["away_id"]]).value_counts()
+    low = counts[counts < OOS_MIN_APPEARANCES]
+    result.stats["low_appearance_teams"] = int(len(low))
+    if len(low):
+        result.note(
+            f"{len(low)} auto-registered team ids with < {OOS_MIN_APPEARANCES} "
+            "total appearances (cup replays, a single relegation-play-off "
+            "leg, or a genuine spelling split)"
+        )
+
+
+def _check_unknown_teams_j1(matches: pd.DataFrame, result: CheckResult) -> None:
+    names = pd.unique(
+        pd.concat([matches["home_team"], matches["away_team"]]).dropna().astype(str)
+    )
+    unknown = sorted(n for n in names if canonical_team_j1(n) is None)
+    result.stats["distinct_teams"] = int(len(names))
+    result.stats["unknown_teams"] = len(unknown)
+    if unknown:
+        result.fail(
+            f"unknown J1 team spellings ({len(unknown)}): {', '.join(unknown[:20])}"
+            " -- add them to footy/data/teams.py JPN_ALIASES"
+        )
+
+
+def _check_j1_season_shape(matches: pd.DataFrame, result: CheckResult) -> None:
+    """`N(N-1)` matches, `N in {18, 20}`, per season -- meaningful only after
+    `j1_filter.filter_regular_season` has dropped the play-off rows
+    (DESIGN_PHASE2.md 6.3, 6.7). The in-progress season is skipped: it has
+    not been played out far enough for the count to mean anything yet."""
+    bad = []
+    current = int(matches["season"].max()) if len(matches) else None
+    for season, group in matches.groupby("season", sort=True):
+        season = int(season)
+        if season == current:
+            continue
+        teams = set(group["home_id"]) | set(group["away_id"])
+        n = len(teams)
+        expected = n * (n - 1)
+        if n not in (18, 20) or len(group) != expected:
+            bad.append(f"{season}: N={n} rows={len(group)} expected={expected}")
+    if bad:
+        result.fail("J1 season shape (post play-off filter): " + "; ".join(bad))
+
+
+def _check_overround(
+    matches: pd.DataFrame,
+    result: CheckResult,
+    cols: tuple[str, str, str],
+    lo: float,
+    hi: float,
+    label: str,
+) -> None:
+    """The PSC-close check in `_check_odds`, generalised to any 1X2 triple
+    and bound pair -- reused for J1's PSC *and* BFEC generations
+    (DESIGN_PHASE2.md 6.7)."""
+    odds = matches[list(cols)]
+    have = odds.notna().all(axis=1)
+    result.stats[f"{label}_rows"] = int(have.sum())
+    result.stats[f"{label}_missing"] = int((~have).sum())
+    present = odds[have]
+    if present.empty:
+        result.note(f"no {label.upper()} prices at all")
+        return
+    nonpositive = int((present <= 0.0).any(axis=1).sum())
+    if nonpositive:
+        result.fail(f"{nonpositive} rows have a non-positive {label.upper()} price")
+
+    overround = (1.0 / present).sum(axis=1)
+    result.stats[f"{label}_overround_mean"] = float(overround.mean())
+    outside = overround[(overround < lo) | (overround > hi)]
+    result.stats[f"{label}_overround_outside"] = int(len(outside))
+    if len(outside):
+        result.fail(
+            f"{len(outside)} rows have a {label.upper()} overround outside "
+            f"[{lo:.2f}, {hi:.2f}] (min {outside.min():.4f}, max "
+            f"{outside.max():.4f})"
+        )
+
+
+def _check_dates_oos(matches: pd.DataFrame, result: CheckResult) -> None:
+    """`_check_dates`, widened one month earlier (Jul 1, not Aug 1).
+
+    Measured directly off the 2005/06-2024/25 OOS-LEAGUES pull: every row
+    E0's Aug1..Aug31(+1y) window rejects falls in 15-31 July, and belongs to
+    B1, D2, F2, SC0 or E1 -- Belgian/German-2/French-2/Scottish/English-2
+    seasons that routinely open in the second half of July. None land
+    outside Jul1..Aug31(+1y), so that (not E0's Aug1) is the window a parse
+    bug should be judged against here; this still fails on a real day/month
+    swap, it just stops flagging a legitimate early kickoff as one.
+    """
+    bad = []
+    for season, group in matches.groupby("season", sort=True):
+        lo = pd.Timestamp(year=int(season), month=7, day=1)
+        hi = pd.Timestamp(year=int(season) + 1, month=8, day=31)
+        outside = group[(group["date"] < lo) | (group["date"] > hi)]
+        if len(outside):
+            bad.append(
+                f"{season_label(int(season))}: {len(outside)} rows outside "
+                f"{lo.date()}..{hi.date()} (first {outside['date'].min().date()})"
+            )
+    if bad:
+        result.fail("season/date mismatch (Jul1..Aug31 window): " + "; ".join(bad))
+    result.stats["date_min"] = str(matches["date"].min().date())
+    result.stats["date_max"] = str(matches["date"].max().date())
+
+
+def run_checks_oos(matches: pd.DataFrame) -> CheckResult:
+    """OOS-LEAGUES profile: same shape as `run_checks`, minus the checks that
+    are structurally E0-only (DESIGN_PHASE2.md 5.4)."""
+    result = CheckResult()
+    result.stats["rows"] = int(len(matches))
+    result.stats["seasons"] = int(matches["season"].nunique())
+    result.stats["divs"] = ",".join(sorted(matches["div"].dropna().unique()))
+
+    _check_oos_teams(matches, result)
+    _check_results(matches, result)
+    _check_duplicates(matches, result)
+    _check_dates_oos(matches, result)
+    _check_odds(matches, result)
+    return result
+
+
+def run_checks_j1(matches: pd.DataFrame) -> CheckResult:
+    """J1 profile: run on the play-off-filtered frame
+    (`j1_filter.filter_regular_season`). Explicit team whitelist and the
+    18/20-team season shape, same discipline as E0 (DESIGN_PHASE2.md 6.7)."""
+    result = CheckResult()
+    result.stats["rows"] = int(len(matches))
+    result.stats["seasons"] = int(matches["season"].nunique())
+
+    _check_unknown_teams_j1(matches, result)
+    _check_j1_season_shape(matches, result)
+    _check_results(matches, result)
+    _check_duplicates(matches, result)
+    _check_dates_range_only(matches, result)
+    _check_overround(
+        matches, result, ("psch", "pscd", "psca"),
+        JPN_OVERROUND_PSC_MIN, JPN_OVERROUND_PSC_MAX, "psc",
+    )
+    _check_overround(
+        matches, result, ("bfech", "bfecd", "bfeca"),
+        JPN_OVERROUND_BFEC_MIN, JPN_OVERROUND_BFEC_MAX, "bfec",
+    )
+    return result
+
+
+def _check_dates_range_only(matches: pd.DataFrame, result: CheckResult) -> None:
+    """J1's Aug-openings/COVID-shuffled calendar does not fit E0's Aug1..Aug31
+    per-season window, so only the overall range is recorded here -- the
+    actual season/date-consistency question is `Season`-column drift, which
+    `source_fd_new.season_label_drift` answers directly off the raw file."""
+    result.stats["date_min"] = str(matches["date"].min().date())
+    result.stats["date_max"] = str(matches["date"].max().date())
 
 
 def format_result(result: CheckResult) -> str:

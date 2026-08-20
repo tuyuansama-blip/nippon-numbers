@@ -35,13 +35,15 @@ from footy.config import (
     TEST_START,
     WINDOW_SEASONS,
 )
+from footy.eval.metrics import encode_outcome
 from footy.model.baseline import make_model
+from footy.model.calibrate import OnlineTb
 from footy.model.dixon_coles import DixonColes
 from footy.odds.devig import market_probs, overround
 
 REFIT_MODES = ("date", "week")
 FRAME_COLUMNS = [
-    "match_id", "date", "season", "season_label", "week_start", "fold",
+    "match_id", "div", "date", "season", "season_label", "week_start", "fold",
     "home_team", "away_team", "home_id", "away_id",
     "fthg", "ftag", "ftr", "y", "empty_crowd",
     "psch", "pscd", "psca", "overround",
@@ -63,7 +65,21 @@ class WalkforwardResult:
 
     @property
     def blocks(self) -> np.ndarray:
-        """Bootstrap block label: the matchweek (Monday of the match's week)."""
+        """Bootstrap block label: (div, matchweek).
+
+        Including `div` is a no-op for a single-division run (every block
+        gets the same prefix, so the set of distinct blocks is unchanged)
+        and is what DESIGN_PHASE2.md 5.2-[1] means by "ブロックは
+        (div, week_start)" for the pooled OOS-LEAGUES run -- two divisions'
+        matches in the same calendar week must never share a bootstrap
+        block, or the resample would treat correlated-by-coincidence weeks
+        from different countries as one draw.
+        """
+        if "div" in self.frame.columns:
+            return (
+                self.frame["div"].astype(str) + "|"
+                + self.frame["week_start"].astype(str)
+            ).to_numpy()
         return self.frame["week_start"].astype(str).to_numpy()
 
     def market(self, method: str = "shin") -> np.ndarray:
@@ -182,8 +198,20 @@ def run_walkforward(
     refit: str = "date",
     params: dict | None = None,
     progress=None,
+    calibrate: str | None = None,
+    calibrate_target: str = "dc",
 ) -> WalkforwardResult:
-    """Refit before every fold, predict the fold, accumulate."""
+    """Refit before every fold, predict the fold, accumulate.
+
+    `calibrate="tb"` adds one more leg, `f"{calibrate_target}_cal"`
+    (DESIGN_PHASE2.md 4): an `OnlineTb` instance sits outside the fold loop,
+    predicts each fold with whatever `phi` its own history has produced so
+    far, and only *afterwards* learns that fold's outcome -- the fold's
+    result is already known at this point in the walk-forward (it is a
+    backtest over played matches), but using it to fit before predicting
+    would be exactly the leak the rest of this module exists to prevent, so
+    the call order below is `predict` then `observe`, never the reverse.
+    """
     params = dict(params or {})
     matches = matches.sort_values(["date", "home_team"], kind="mergesort")
     matches = matches.reset_index(drop=True)
@@ -204,7 +232,18 @@ def run_walkforward(
     kwargs = _build_models(models, params)
     warm: dict[str, DixonColes | None] = {name: None for name in models}
     collected: list[pd.DataFrame] = []
-    predictions: dict[str, list[np.ndarray]] = {name: [] for name in models}
+    leg_names = list(models)
+    calibrator: OnlineTb | None = None
+    if calibrate:
+        if calibrate not in ("tb",):
+            raise ValueError(f"unknown calibrate mode {calibrate!r}; only 'tb' exists")
+        if calibrate_target not in models:
+            raise ValueError(
+                f"calibrate_target={calibrate_target!r} is not in models={models!r}"
+            )
+        calibrator = OnlineTb()
+        leg_names = leg_names + [f"{calibrate_target}_cal"]
+    predictions: dict[str, list[np.ndarray]] = {name: [] for name in leg_names}
     fit_rows: list[dict] = []
 
     for number, (key, fold) in enumerate(folds, start=1):
@@ -241,7 +280,19 @@ def run_walkforward(
                 row[f"{name}_converged"] = model.meta.converged
             else:
                 model.fit(matches, asof)
-            predictions[name].append(model.predict_1x2(fold))
+            raw_pred = model.predict_1x2(fold)
+            predictions[name].append(raw_pred)
+
+            if calibrator is not None and name == calibrate_target:
+                calibrated = calibrator.predict(asof, raw_pred)
+                predictions[f"{name}_cal"].append(calibrated)
+                fold_y = encode_outcome(fold["ftr"])
+                calibrator.observe(raw_pred, fold_y)
+                row["cal_n_history"] = calibrator.n_history
+                row["cal_warm"] = calibrator.n_history >= calibrator.warmup
+                row["cal_temperature"] = float(np.exp(calibrator.phi[0]))
+                row["cal_phi_home"] = float(calibrator.phi[1])
+                row["cal_phi_draw"] = float(calibrator.phi[2])
 
         fit_rows.append(row)
         collected.append(fold)
@@ -261,8 +312,6 @@ def run_walkforward(
     for i, suffix in enumerate("hda"):
         frame[f"market_shin_{suffix}"] = shin[:, i]
         frame[f"market_mult_{suffix}"] = mult[:, i]
-
-    from footy.eval.metrics import encode_outcome
 
     frame["y"] = encode_outcome(frame["ftr"])
     frame = frame[[c for c in FRAME_COLUMNS if c in frame.columns]]
