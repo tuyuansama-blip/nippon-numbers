@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Track Record · Nippon Numbers</title>
+<meta name="description" content="The live, forward-only prediction record for Nippon Numbers, kept separate from the 2014-2025 backtest.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="index.html">Nippon Numbers</a>
+    <nav aria-label="Main">
+      <ul class="site-nav">
+        <li><a href="index.html">Predictions</a></li>
+        <li><a href="methodology.html">Methodology</a></li>
+        <li><a href="record.html" aria-current="page">Track Record</a></li>
+      </ul>
+    </nav>
+  </div>
+</header>
+<main>
+  <div class="wrap">
+
+<h1>Track record</h1>
+<p class="lede">
+  Two separate boxes, on purpose. The backtest below is historical evidence
+  that the method works in general. The live record is this specific,
+  forward-published set of predictions, scored only after the fact. They are
+  never averaged together into one number &mdash; doing that would let a
+  strong backtest paper over a bad live run, or vice versa.
+</p>
+
+<h2>Live record</h2>
+<p>Recording began with the round published on 2026-08-21. Every prediction in it was written to a file and committed before its matches kicked off; results are added afterwards, in a separate step, to a <code>result</code> field that starts as <code>null</code> and is filled in once &mdash; the probabilities themselves are never edited.</p>
+
+<div class="card">
+<p><strong>0 matches reconciled yet.</strong> This round's fixtures have not been played (or their results have not yet been fetched and matched back to the prediction file). Check back after kickoff.</p>
+</div>
+
+<h2>Backtest (2014&ndash;2025, reference only)</h2>
+<p>This is the one confirmation run described in full on the <a href="methodology.html">Methodology</a> page. It is historical, not forward-published, and is shown here only as a reference point &mdash; never combined with the live numbers above.</p>
+<div class="card card--muted">
+<dl class="meta">
+  <dt>Matches</dt><dd>3,882 (2014&ndash;2025-26)</dd>
+  <dt>Verdict</dt><dd><span class="badge badge--ok">PASS</span></dd>
+  <dt>d_RPS (market &minus; model)</dt><dd>0.0044 [0.0026, 0.0060]</dd>
+  <dt>Gap closed</dt><dd>74%</dd>
+</dl>
+</div>
+
+<h2>How to verify this yourself</h2>
+<ol>
+  <li>Every published round is a JSON file in <code>predictions/</code>, committed to the project's git repository, with probabilities that are never edited after publication &mdash; only a <code>result</code> field is appended once a match is played.</li>
+  <li>Recompute the SHA-256 of any prediction file and compare it against the value printed on that round's page.</li>
+  <li>Once results exist, the numbers above are rebuilt directly from those same JSON files (not from a database or a spreadsheet) &mdash; anyone can re-run the same aggregation against the public files.</li>
+  <li>Reproduce the backtest above with <code>./bin/footy backtest --league jpn1 --from 2014 --to 2025</code>.</li>
+</ol>
+<p>
+  Independent timestamping (OpenTimestamps), Wayback Machine snapshots and a
+  reproducible re-scoring script (<code>verify.py</code>) are part of this
+  project's published plan and are not live yet &mdash; this page will link
+  to them once they are.
+</p>
+
+  </div>
+</main>
+<footer class="site-footer">
+  <div class="wrap">
+    <p class="disclaimer">Statistical model output for research and entertainment. Not betting advice. Not affiliated with the J.League or any club.</p>
+    <p class="attribution">Historical results and closing prices: football-data.co.uk. Pre-match prices via The Odds API (used to time and gate publication; raw prices are not shown or redistributed).</p>
+    <p>&copy; Nippon Numbers. Predictions and data are published under CC BY 4.0; model code under MIT.</p>
+  </div>
+</footer>
+</body>
+</html>

@@ -399,6 +399,24 @@ def cmd_predict(args) -> int:
     return 0
 
 
+def cmd_site_build(args) -> int:
+    """`footy site build` (DESIGN_SITE.md 2.1): predictions/*.json -> static
+    HTML in site/. Writes nothing if there is no prediction to render."""
+    from footy.site.build import build_site
+
+    result = build_site(predictions_dir=args.predictions_dir, output_dir=args.out)
+    if not result["ok"]:
+        print(f"error: {result['reason']}", file=sys.stderr)
+        return 2
+
+    print(f"round {result['round_id']}: {result['n_fixtures']} fixture(s)")
+    print(f"track record: {result['track_record_rows']} resolved match(es)")
+    for name, path in result["written"].items():
+        print(f"written: {path}")
+    print(f"output dir: {result['output_dir']}")
+    return 0
+
+
 def cmd_weekly(args) -> int:
     """`footy weekly` -- runs the DESIGN_PHASE2.md 9 pipeline steps due today
     (JST), or exactly `--steps` when given."""
@@ -502,6 +520,16 @@ def build_parser() -> argparse.ArgumentParser:
     predict.add_argument("--snapshot-dir", dest="snapshot_dir", default=None)
     predict.add_argument("--predictions-dir", dest="predictions_dir", default=None)
     predict.set_defaults(func=cmd_predict)
+
+    site = sub.add_parser("site", help="public site generator (DESIGN_SITE.md 2.1)")
+    site_sub = site.add_subparsers(dest="site_command", required=True)
+
+    site_build = site_sub.add_parser(
+        "build", help="predictions/*.json -> static HTML in site/"
+    )
+    site_build.add_argument("--predictions-dir", dest="predictions_dir", default=None)
+    site_build.add_argument("--out", default=None, help="output directory (default: site/)")
+    site_build.set_defaults(func=cmd_site_build)
 
     weekly = sub.add_parser("weekly", help="run the weekly pipeline (DESIGN_PHASE2.md 9)")
     weekly.add_argument(

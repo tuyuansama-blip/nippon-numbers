@@ -1,0 +1,66 @@
+{% extends "base.html.j2" %}
+{% block title %}Track Record · {{ site_name }}{% endblock %}
+{% block description %}The live, forward-only prediction record for {{ site_name }}, kept separate from the 2014-2025 backtest.{% endblock %}
+{% block content %}
+
+<h1>Track record</h1>
+<p class="lede">
+  Two separate boxes, on purpose. The backtest below is historical evidence
+  that the method works in general. The live record is this specific,
+  forward-published set of predictions, scored only after the fact. They are
+  never averaged together into one number &mdash; doing that would let a
+  strong backtest paper over a bad live run, or vice versa.
+</p>
+
+<h2>Live record</h2>
+{% if first_round_id %}
+<p>Recording began with the round published on {{ first_round_id }}. Every prediction in it was written to a file and committed before its matches kicked off; results are added afterwards, in a separate step, to a <code>result</code> field that starts as <code>null</code> and is filled in once &mdash; the probabilities themselves are never edited.</p>
+{% else %}
+<p>No predictions have been published yet.</p>
+{% endif %}
+
+<div class="card">
+{% if live.n == 0 %}
+<p><strong>0 matches reconciled yet.</strong> {% if first_round_id %}This round's fixtures have not been played (or their results have not yet been fetched and matched back to the prediction file). Check back after kickoff.{% endif %}</p>
+{% else %}
+<p>
+  <strong>{{ live.n }} match{{ 'es' if live.n != 1 else '' }}</strong> resolved
+  across {{ live.rounds }} round{{ 's' if live.rounds != 1 else '' }}.
+  Mean RPS (calibrated): {{ '%.4f'|format(live.mean_rps_cal) }}.
+</p>
+<p class="notice">
+  Too few matches to mean anything yet (n = {{ live.n }}, threshold n =
+  {{ live_min_n }}). At this sample size the uncertainty on any summary
+  statistic swamps the statistic itself. This model is not touched while
+  that is true &mdash; changing it in response to early results would
+  invalidate the pre-registration the rest of this site relies on.
+</p>
+{% endif %}
+</div>
+
+<h2>Backtest (2014&ndash;2025, reference only)</h2>
+<p>This is the one confirmation run described in full on the <a href="methodology.html">Methodology</a> page. It is historical, not forward-published, and is shown here only as a reference point &mdash; never combined with the live numbers above.</p>
+<div class="card card--muted">
+<dl class="meta">
+  <dt>Matches</dt><dd>{{ '{:,}'.format(run.n_matches) }} ({{ run.season_from }}&ndash;{{ run.season_to }})</dd>
+  <dt>Verdict</dt><dd><span class="badge badge--ok">{{ run.verdict }}</span></dd>
+  <dt>d_RPS (market &minus; model)</dt><dd>{{ '%.4f'|format(run.d_rps) }} [{{ '%.4f'|format(run.d_rps_ci_lo) }}, {{ '%.4f'|format(run.d_rps_ci_hi) }}]</dd>
+  <dt>Gap closed</dt><dd>{{ '%.0f'|format(run.gap_closed_rps * 100) }}%</dd>
+</dl>
+</div>
+
+<h2>How to verify this yourself</h2>
+<ol>
+  <li>Every published round is a JSON file in <code>predictions/</code>, committed to the project's git repository, with probabilities that are never edited after publication &mdash; only a <code>result</code> field is appended once a match is played.</li>
+  <li>Recompute the SHA-256 of any prediction file and compare it against the value printed on that round's page.</li>
+  <li>Once results exist, the numbers above are rebuilt directly from those same JSON files (not from a database or a spreadsheet) &mdash; anyone can re-run the same aggregation against the public files.</li>
+  <li>Reproduce the backtest above with <code>{{ run.reproduce_cmd }}</code>.</li>
+</ol>
+<p>
+  Independent timestamping (OpenTimestamps), Wayback Machine snapshots and a
+  reproducible re-scoring script (<code>verify.py</code>) are part of this
+  project's published plan and are not live yet &mdash; this page will link
+  to them once they are.
+</p>
+
+{% endblock %}

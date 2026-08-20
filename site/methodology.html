@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Methodology · Nippon Numbers</title>
+<meta name="description" content="How Nippon Numbers forecasts J1 League matches: the model, the calibration layer, and the validation protocol -- in plain English.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="index.html">Nippon Numbers</a>
+    <nav aria-label="Main">
+      <ul class="site-nav">
+        <li><a href="index.html">Predictions</a></li>
+        <li><a href="methodology.html" aria-current="page">Methodology</a></li>
+        <li><a href="record.html">Track Record</a></li>
+      </ul>
+    </nav>
+  </div>
+</header>
+<main>
+  <div class="wrap">
+
+<h1>Methodology</h1>
+<p class="lede">What the model is, how its probabilities are calibrated, and how the whole pipeline was validated before a single number went public.</p>
+
+<h2>The model</h2>
+<p>
+  Each team gets an attack rating and a defence rating, estimated from every
+  match in a rolling six-season window. A match's expected goals for each
+  side come from those two ratings plus a single global home-advantage term.
+  Goals are modelled as Poisson counts, with a small, well-established
+  correction (Dixon &amp; Coles, 1997) for how often low-scoring results
+  (0&ndash;0, 1&ndash;0, 0&ndash;1, 1&ndash;1) actually occur. Older matches
+  count for less: each match's weight decays with its age, roughly
+  halving over a season. Ratings are fit by maximising a penalised
+  likelihood (a ridge penalty keeps unstable, sparsely-observed teams close
+  to a league-average prior) rather than a hand-tuned heuristic.
+</p>
+<p>
+  Newly promoted clubs get no special-case treatment beyond their prior: a
+  team with zero matches in the window starts at the historical average
+  rating for previously promoted teams, then moves as its own matches
+  arrive. Everything above &mdash; the decay half-life, the ridge strength,
+  the promoted-team prior, the training-window length &mdash; was chosen
+  once, on data through 2011/12, and has not been touched since (see
+  <em>Validation protocol</em> below).
+</p>
+
+<h2>Calibration layer</h2>
+<p>
+  Raw model probabilities are passed through a light online recalibration
+  step before publication: a temperature (how confident the raw
+  probabilities are, overall) plus separate home/draw offsets, refit monthly
+  on every match seen so far. This is a hygiene device, not a performance
+  device &mdash; on its own it moves accuracy by a fraction of what the base
+  model contributes. It exists because J1's home-win and draw rates swing
+  more from year to year than most leagues', and because a site whose whole
+  claim is "our calibration curve is public" should keep that curve
+  automatically straight rather than relying on someone remembering to
+  refit it. The calibration layer is required to prove it does no harm
+  before it is allowed to ship (a pre-registered "do-no-harm" gate on a
+  held-out period), never to prove it helps.
+</p>
+
+<h2>Validation protocol</h2>
+<p>
+  The period split was fixed before any test data was looked at: 2000&ndash;2011
+  to choose the decay rate, ridge strength and promoted-team prior; everything
+  from 2014 onward held out and untouched until a single confirmation run.
+  Pass/fail thresholds for that confirmation run were written down and frozen
+  <em>before</em> it was executed, alongside a git tag over the exact frozen
+  parameters and thresholds used, so nothing was adjusted after seeing the
+  result. The confirmation run itself was done in a fixed order &mdash; fifteen
+  other, previously-untouched leagues first, to catch implementation bugs
+  cheaply, and only then the one J1 run this project gets to spend. A
+  <code>params_hash</code> is embedded in every published prediction file so
+  the parameters that produced it can be checked against that pre-registration
+  tag after the fact. Each week's predictions must also clear a publish gate
+  (training-data floor, fixture-count check, hash match) before anything is
+  written &mdash; a run that fails the gate produces no page rather than a
+  stale or empty one.
+</p>
+
+<h2>The one confirmation run, in full</h2>
+<p>
+  This is the single most important evidence on the site: a one-shot,
+  pre-registered walk-forward backtest against 3,882 J1 matches
+  (2014&ndash;2025-26), scored match-by-match
+  against Pinnacle closing price (Shin de-vig) and against a "knowing nothing" climatology
+  baseline. The result:
+</p>
+<div class="table-scroll">
+<table>
+<caption>Ranked Probability Score (RPS) &mdash; lower is better. Same 3,882-match set for every row.</caption>
+<thead><tr><th scope="col">Predictor</th><th scope="col" class="num">RPS</th></tr></thead>
+<tbody>
+<tr><td>Pinnacle closing price (Shin de-vig)</td><td class="num">0.2167</td></tr>
+<tr><td>This model (calibrated)</td><td class="num">0.2211</td></tr>
+<tr><td>Knowing nothing (climatology)</td><td class="num">0.2337</td></tr>
+</tbody>
+</table>
+</div>
+<p>
+  The betting market is still better than this model, by
+  0.0044 RPS (95% CI [0.0026,
+  0.0060], paired, block-bootstrapped by
+  matchweek). Put differently, this model closes about
+  74% of the gap between guessing
+  from long-run rates and the sharpest available price. Decomposing the
+  remaining gap (a Murphy/Brier decomposition): essentially none of it is
+  bad calibration (-0.00001) &mdash;
+  almost all of it (0.00290) is the model
+  simply not having information the market has. When we say a team has a
+  25% chance to win, it wins close to 25% of the time: the mean predicted
+  probability of a draw across the whole set was
+  0.2501 against an observed draw rate of
+  0.2499 (a +0.0003
+  difference).
+</p>
+<p>
+  Verdict: <strong>PASS</strong>, 12
+  of 3,894 matches excluded from the
+  head-to-head comparison for lacking a market close (they remain in the
+  model-only figures). Reproduce this exact run yourself with
+  <code>./bin/footy backtest --league jpn1 --from 2014 --to 2025</code>.
+</p>
+
+<div class="notice">
+  <p>
+    <strong>What this model does not see:</strong> injuries, lineups, red
+    cards, transfers, managerial changes, fixture congestion, travel
+    distance, or shot-quality data (xG) &mdash; none of it is in the data
+    this project has licensed. It sees final scores and, for calibration
+    context only, pre-match market prices. The 2026-27 season's opening
+    weeks are this project's weakest-covered stretch to date: three promoted
+    clubs (Mito, Chiba, V-Varen Nagasaki) were never observed in J2, and the
+    six months of pre-season football in between are outside this dataset
+    entirely. That is stated here in advance, not discovered after the fact.
+  </p>
+</div>
+
+  </div>
+</main>
+<footer class="site-footer">
+  <div class="wrap">
+    <p class="disclaimer">Statistical model output for research and entertainment. Not betting advice. Not affiliated with the J.League or any club.</p>
+    <p class="attribution">Historical results and closing prices: football-data.co.uk. Pre-match prices via The Odds API (used to time and gate publication; raw prices are not shown or redistributed).</p>
+    <p>&copy; Nippon Numbers. Predictions and data are published under CC BY 4.0; model code under MIT.</p>
+  </div>
+</footer>
+</body>
+</html>

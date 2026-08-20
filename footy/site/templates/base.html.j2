@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}{{ site_name }}{% endblock %}</title>
+<meta name="description" content="{% block description %}Match probabilities for Japan's J1 League, published before kickoff and scored afterwards.{% endblock %}">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="index.html">{{ site_name }}</a>
+    <nav aria-label="Main">
+      <ul class="site-nav">
+        <li><a href="index.html"{% if active_page == 'index' %} aria-current="page"{% endif %}>Predictions</a></li>
+        <li><a href="methodology.html"{% if active_page == 'methodology' %} aria-current="page"{% endif %}>Methodology</a></li>
+        <li><a href="record.html"{% if active_page == 'record' %} aria-current="page"{% endif %}>Track Record</a></li>
+      </ul>
+    </nav>
+  </div>
+</header>
+<main>
+  <div class="wrap">
+    {% block content %}{% endblock %}
+  </div>
+</main>
+<footer class="site-footer">
+  <div class="wrap">
+    <p class="disclaimer">{{ disclaimer }}</p>
+    <p class="attribution">{{ attribution }}</p>
+    <p>&copy; {{ site_name }}. Predictions and data are published under CC BY 4.0; model code under MIT.</p>
+  </div>
+</footer>
+</body>
+</html>

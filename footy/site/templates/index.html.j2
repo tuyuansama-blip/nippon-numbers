@@ -1,0 +1,95 @@
+{% extends "base.html.j2" %}
+{% block title %}{{ round_label }} · {{ site_name }}{% endblock %}
+{% block description %}Pre-kickoff win/draw/loss probabilities for {{ round_label }}, fixed before the matches were played and never edited afterwards.{% endblock %}
+{% block content %}
+
+<h1>{{ round_label }}</h1>
+<p class="lede">Match probabilities for Japan's J1 League. {{ payload.matches|length }} fixtures, fixed before kickoff.</p>
+
+<div class="callout">
+  <p><strong>The market is measurably better than this model.</strong> Over {{ '{:,}'.format(run.n_matches) }} backtested J1 matches ({{ run.season_from }}&ndash;{{ run.season_to }}), the closing betting market scored {{ '%.4f'|format(run.d_rps) }} RPS points better than this model on average (95% CI [{{ '%.4f'|format(run.d_rps_ci_lo) }}, {{ '%.4f'|format(run.d_rps_ci_hi) }}]) &mdash; see <a href="methodology.html">Methodology</a>. A disagreement with the market below is a question, not an answer: this model has no information the market lacks. It does not see injuries, lineups, suspensions or travel.</p>
+</div>
+
+<h2>Metadata</h2>
+<dl class="meta">
+  <dt>Published (UTC)</dt><dd>{{ payload.generated_at|fmt_utc }}</dd>
+  <dt>Trained as of (UTC)</dt><dd>{{ payload.asof|fmt_utc }}</dd>
+  <dt>Model version</dt><dd>{{ payload.model_version }}</dd>
+  <dt>params_hash</dt><dd>{{ payload.params_hash }}</dd>
+  <dt>File SHA-256</dt><dd>{{ file_sha256 }}</dd>
+  <dt>Market snapshot SHA-256</dt><dd>{{ payload.odds_snapshot.combined_sha256 }}</dd>
+  <dt>Training window</dt><dd>{{ payload.training_window.n_matches }} matches, {{ payload.training_window.n_teams }} teams, since {{ payload.training_window.from_season }}</dd>
+  <dt>Publish gate</dt>
+  <dd>
+    {% if payload.publish_gate.ok %}
+    <span class="badge badge--ok">PASS</span>
+    {% else %}
+    <span class="badge badge--warn">BLOCKED</span>
+    {% endif %}
+  </dd>
+</dl>
+
+<h2>Verification</h2>
+<p>
+  This file is committed as <code>predictions/{{ source_filename }}</code> in the project's
+  git repository, with the SHA-256 shown above. On its own, a git commit
+  timestamp is <strong>not</strong> strong third-party evidence that a
+  prediction existed before kickoff &mdash; the author can set it to any date.
+  Independent timestamping (OpenTimestamps), Wayback Machine archiving and a
+  GitHub Actions server-time witness are part of this project's published
+  plan for closing that gap (design document, section&nbsp;3) and are not yet
+  wired into this build. Until they are, verify what you can today: recompute
+  the SHA-256 of the committed file yourself and confirm it matches the value
+  above, and read the raw JSON &mdash; nothing on this page is derived from
+  anything else.
+</p>
+
+<h2>Fixtures</h2>
+<div class="table-scroll">
+<table>
+<caption>Calibrated model probabilities. No market odds are shown here &mdash; see Methodology for why.</caption>
+<thead>
+<tr>
+  <th scope="col">Kickoff (UTC)</th>
+  <th scope="col">Home</th>
+  <th scope="col">Away</th>
+  <th scope="col" class="num">P(H)</th>
+  <th scope="col" class="num">P(D)</th>
+  <th scope="col" class="num">P(A)</th>
+  <th scope="col">Result</th>
+</tr>
+</thead>
+<tbody>
+{% for m in payload.matches %}
+<tr>
+  <td>{{ m.commence_time|fmt_utc }}</td>
+  <td>{{ m.home_team }}</td>
+  <td>{{ m.away_team }}</td>
+  <td class="num">{{ m.p_calibrated.h|fmt_pct }}</td>
+  <td class="num">{{ m.p_calibrated.d|fmt_pct }}</td>
+  <td class="num">{{ m.p_calibrated.a|fmt_pct }}</td>
+  <td>
+    {% if m.result %}
+    {{ m.result.fthg|int }}&ndash;{{ m.result.ftag|int }} ({{ m.result.ftr }})
+    {% else %}
+    not yet played
+    {% endif %}
+  </td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+
+{% if payload.round_summary %}
+<h2>Round result</h2>
+<p>
+  {{ payload.round_summary.n_resolved }} of {{ payload.round_summary.n_matches }} fixtures resolved.
+  {% if payload.round_summary.mean_rps_cal is not none %}
+  Mean RPS (calibrated model): {{ '%.4f'|format(payload.round_summary.mean_rps_cal) }}.
+  {% endif %}
+  See <a href="record.html">Track Record</a> for the cumulative, non-backtest picture.
+</p>
+{% endif %}
+
+{% endblock %}

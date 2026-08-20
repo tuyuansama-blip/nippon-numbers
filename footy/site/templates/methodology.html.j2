@@ -1,0 +1,125 @@
+{% extends "base.html.j2" %}
+{% block title %}Methodology · {{ site_name }}{% endblock %}
+{% block description %}How {{ site_name }} forecasts J1 League matches: the model, the calibration layer, and the validation protocol -- in plain English.{% endblock %}
+{% block content %}
+
+<h1>Methodology</h1>
+<p class="lede">What the model is, how its probabilities are calibrated, and how the whole pipeline was validated before a single number went public.</p>
+
+<h2>The model</h2>
+<p>
+  Each team gets an attack rating and a defence rating, estimated from every
+  match in a rolling six-season window. A match's expected goals for each
+  side come from those two ratings plus a single global home-advantage term.
+  Goals are modelled as Poisson counts, with a small, well-established
+  correction (Dixon &amp; Coles, 1997) for how often low-scoring results
+  (0&ndash;0, 1&ndash;0, 0&ndash;1, 1&ndash;1) actually occur. Older matches
+  count for less: each match's weight decays with its age, roughly
+  halving over a season. Ratings are fit by maximising a penalised
+  likelihood (a ridge penalty keeps unstable, sparsely-observed teams close
+  to a league-average prior) rather than a hand-tuned heuristic.
+</p>
+<p>
+  Newly promoted clubs get no special-case treatment beyond their prior: a
+  team with zero matches in the window starts at the historical average
+  rating for previously promoted teams, then moves as its own matches
+  arrive. Everything above &mdash; the decay half-life, the ridge strength,
+  the promoted-team prior, the training-window length &mdash; was chosen
+  once, on data through 2011/12, and has not been touched since (see
+  <em>Validation protocol</em> below).
+</p>
+
+<h2>Calibration layer</h2>
+<p>
+  Raw model probabilities are passed through a light online recalibration
+  step before publication: a temperature (how confident the raw
+  probabilities are, overall) plus separate home/draw offsets, refit monthly
+  on every match seen so far. This is a hygiene device, not a performance
+  device &mdash; on its own it moves accuracy by a fraction of what the base
+  model contributes. It exists because J1's home-win and draw rates swing
+  more from year to year than most leagues', and because a site whose whole
+  claim is "our calibration curve is public" should keep that curve
+  automatically straight rather than relying on someone remembering to
+  refit it. The calibration layer is required to prove it does no harm
+  before it is allowed to ship (a pre-registered "do-no-harm" gate on a
+  held-out period), never to prove it helps.
+</p>
+
+<h2>Validation protocol</h2>
+<p>
+  The period split was fixed before any test data was looked at: 2000&ndash;2011
+  to choose the decay rate, ridge strength and promoted-team prior; everything
+  from 2014 onward held out and untouched until a single confirmation run.
+  Pass/fail thresholds for that confirmation run were written down and frozen
+  <em>before</em> it was executed, alongside a git tag over the exact frozen
+  parameters and thresholds used, so nothing was adjusted after seeing the
+  result. The confirmation run itself was done in a fixed order &mdash; fifteen
+  other, previously-untouched leagues first, to catch implementation bugs
+  cheaply, and only then the one J1 run this project gets to spend. A
+  <code>params_hash</code> is embedded in every published prediction file so
+  the parameters that produced it can be checked against that pre-registration
+  tag after the fact. Each week's predictions must also clear a publish gate
+  (training-data floor, fixture-count check, hash match) before anything is
+  written &mdash; a run that fails the gate produces no page rather than a
+  stale or empty one.
+</p>
+
+<h2>The one confirmation run, in full</h2>
+<p>
+  This is the single most important evidence on the site: a one-shot,
+  pre-registered walk-forward backtest against {{ '{:,}'.format(run.n_matches) }} J1 matches
+  ({{ run.season_from }}&ndash;{{ run.season_to }}), scored match-by-match
+  against {{ run.market_desc }} and against a "knowing nothing" climatology
+  baseline. The result:
+</p>
+<div class="table-scroll">
+<table>
+<caption>Ranked Probability Score (RPS) &mdash; lower is better. Same {{ '{:,}'.format(run.n_matches) }}-match set for every row.</caption>
+<thead><tr><th scope="col">Predictor</th><th scope="col" class="num">RPS</th></tr></thead>
+<tbody>
+<tr><td>{{ run.market_desc }}</td><td class="num">{{ '%.4f'|format(run.rps_market) }}</td></tr>
+<tr><td>This model (calibrated)</td><td class="num">{{ '%.4f'|format(run.rps_model) }}</td></tr>
+<tr><td>Knowing nothing (climatology)</td><td class="num">{{ '%.4f'|format(run.rps_climatology) }}</td></tr>
+</tbody>
+</table>
+</div>
+<p>
+  The betting market is still better than this model, by
+  {{ '%.4f'|format(run.d_rps) }} RPS (95% CI [{{ '%.4f'|format(run.d_rps_ci_lo) }},
+  {{ '%.4f'|format(run.d_rps_ci_hi) }}], paired, block-bootstrapped by
+  matchweek). Put differently, this model closes about
+  {{ '%.0f'|format(run.gap_closed_rps * 100) }}% of the gap between guessing
+  from long-run rates and the sharpest available price. Decomposing the
+  remaining gap (a Murphy/Brier decomposition): essentially none of it is
+  bad calibration ({{ '%.5f'|format(run.murphy_reliability) }}) &mdash;
+  almost all of it ({{ '%.5f'|format(run.murphy_resolution) }}) is the model
+  simply not having information the market has. When we say a team has a
+  25% chance to win, it wins close to 25% of the time: the mean predicted
+  probability of a draw across the whole set was
+  {{ '%.4f'|format(run.draw_p_mean) }} against an observed draw rate of
+  {{ '%.4f'|format(run.draw_observed) }} (a {{ '%+.4f'|format(run.draw_diff) }}
+  difference).
+</p>
+<p>
+  Verdict: <strong>{{ run.verdict }}</strong>, {{ run.n_excluded_no_close }}
+  of {{ '{:,}'.format(run.n_matches + run.n_excluded_no_close) }} matches excluded from the
+  head-to-head comparison for lacking a market close (they remain in the
+  model-only figures). Reproduce this exact run yourself with
+  <code>{{ run.reproduce_cmd }}</code>.
+</p>
+
+<div class="notice">
+  <p>
+    <strong>What this model does not see:</strong> injuries, lineups, red
+    cards, transfers, managerial changes, fixture congestion, travel
+    distance, or shot-quality data (xG) &mdash; none of it is in the data
+    this project has licensed. It sees final scores and, for calibration
+    context only, pre-match market prices. The 2026-27 season's opening
+    weeks are this project's weakest-covered stretch to date: three promoted
+    clubs (Mito, Chiba, V-Varen Nagasaki) were never observed in J2, and the
+    six months of pre-season football in between are outside this dataset
+    entirely. That is stated here in advance, not discovered after the fact.
+  </p>
+</div>
+
+{% endblock %}
