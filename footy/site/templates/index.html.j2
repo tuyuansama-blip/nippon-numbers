@@ -10,40 +10,6 @@
   <p><strong>The market is measurably better than this model.</strong> Over {{ '{:,}'.format(run.n_matches) }} backtested J1 matches ({{ run.season_from }}&ndash;{{ run.season_to }}), the closing betting market scored {{ '%.4f'|format(run.d_rps) }} RPS points better than this model on average (95% CI [{{ '%.4f'|format(run.d_rps_ci_lo) }}, {{ '%.4f'|format(run.d_rps_ci_hi) }}]) &mdash; see <a href="methodology.html">Methodology</a>. A disagreement with the market below is a question, not an answer: this model has no information the market lacks. It does not see injuries, lineups, suspensions or travel.</p>
 </div>
 
-<h2>Metadata</h2>
-<dl class="meta">
-  <dt>Published (UTC)</dt><dd>{{ payload.generated_at|fmt_utc }}</dd>
-  <dt>Trained as of (UTC)</dt><dd>{{ payload.asof|fmt_utc }}</dd>
-  <dt>Model version</dt><dd>{{ payload.model_version }}</dd>
-  <dt>params_hash</dt><dd>{{ payload.params_hash }}</dd>
-  <dt>File SHA-256</dt><dd>{{ file_sha256 }}</dd>
-  <dt>Market snapshot SHA-256</dt><dd>{{ payload.odds_snapshot.combined_sha256 }}</dd>
-  <dt>Training window</dt><dd>{{ payload.training_window.n_matches }} matches, {{ payload.training_window.n_teams }} teams, since {{ payload.training_window.from_season }}</dd>
-  <dt>Publish gate</dt>
-  <dd>
-    {% if payload.publish_gate.ok %}
-    <span class="badge badge--ok">PASS</span>
-    {% else %}
-    <span class="badge badge--warn">BLOCKED</span>
-    {% endif %}
-  </dd>
-</dl>
-
-<h2>Verification</h2>
-<p>
-  This file is committed as <code>predictions/{{ source_filename }}</code> in the project's
-  git repository, with the SHA-256 shown above. On its own, a git commit
-  timestamp is <strong>not</strong> strong third-party evidence that a
-  prediction existed before kickoff &mdash; the author can set it to any date.
-  Independent timestamping (OpenTimestamps), Wayback Machine archiving and a
-  GitHub Actions server-time witness are part of this project's published
-  plan for closing that gap (design document, section&nbsp;3) and are not yet
-  wired into this build. Until they are, verify what you can today: recompute
-  the SHA-256 of the committed file yourself and confirm it matches the value
-  above, and read the raw JSON &mdash; nothing on this page is derived from
-  anything else.
-</p>
-
 <h2>Fixtures</h2>
 <div class="table-scroll">
 <table>
@@ -91,5 +57,42 @@
   See <a href="record.html">Track Record</a> for the cumulative, non-backtest picture.
 </p>
 {% endif %}
+
+<details class="meta-details">
+  <summary><h2>Metadata &amp; verification</h2></summary>
+
+  <dl class="meta">
+    <dt>Published (UTC)</dt><dd>{{ payload.generated_at|fmt_utc }}</dd>
+    <dt>Trained as of (UTC)</dt><dd>{{ payload.asof|fmt_utc }}</dd>
+    <dt>Model version</dt><dd>{{ payload.model_version }}</dd>
+    <dt>params_hash</dt><dd>{{ payload.params_hash }}</dd>
+    <dt>File SHA-256</dt><dd>{{ file_sha256 }}</dd>
+    <dt>Market snapshot SHA-256</dt><dd>{{ payload.odds_snapshot.combined_sha256 }}</dd>
+    <dt>Training window</dt><dd>{{ payload.training_window.n_matches }} matches, {{ payload.training_window.n_teams }} teams, since {{ payload.training_window.from_season }}</dd>
+    <dt>Publish gate</dt>
+    <dd>
+      {% if payload.publish_gate.ok %}
+      <span class="badge badge--ok">PASS</span>
+      {% else %}
+      <span class="badge badge--warn">BLOCKED</span>
+      {% endif %}
+    </dd>
+  </dl>
+
+  <h3>How to verify</h3>
+  <p>
+    This file is committed as <code>predictions/{{ source_filename }}</code> in the project's
+    git repository, with the SHA-256 shown above. On its own, a git commit
+    timestamp is <strong>not</strong> strong third-party evidence that a
+    prediction existed before kickoff &mdash; the author can set it to any date.
+    Independent timestamping (OpenTimestamps), Wayback Machine archiving and a
+    GitHub Actions server-time witness are part of this project's published
+    plan for closing that gap (design document, section&nbsp;3) and are not yet
+    wired into this build. Until they are, verify what you can today: recompute
+    the SHA-256 of the committed file yourself and confirm it matches the value
+    above, and read the raw JSON &mdash; nothing on this page is derived from
+    anything else.
+  </p>
+</details>
 
 {% endblock %}

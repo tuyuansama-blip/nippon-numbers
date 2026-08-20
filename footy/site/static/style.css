@@ -409,3 +409,8 @@ dl.meta dd {
     font-size: var(--font-size-28);
   }
 }
+
+/* Collapsed metadata block at the foot of the predictions page */
+.meta-details { margin-top: 2.5rem; border-top: 1px solid var(--color-border, #767676); padding-top: 1rem; }
+.meta-details summary { cursor: pointer; }
+.meta-details summary h2 { display: inline; font-size: 1.125rem; }
