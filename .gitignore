@@ -1,0 +1,24 @@
+# Raw season CSVs are re-fetchable from football-data.co.uk in ~30 requests.
+data/raw/
+data/matches.parquet
+
+# Reports are run artefacts: Markdown, PNGs and the saved prediction frames.
+reports/
+
+# data/frozen_params.json is deliberately NOT ignored -- it is the output of
+# the one-time TUNE search and the reason a TEST run is reproducible.
+
+# Secrets. .env in this directory holds a live third-party API key.
+.env
+.env.*
+
+# Snapshots pulled from a paid odds API by scripts/collect_odds.sh. Unrelated
+# to this spike (J1, not E0) and not ours to redistribute.
+data/odds_snapshots/
+
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.DS_Store
+.ipynb_checkpoints/

@@ -1,0 +1,15 @@
+#!/bin/sh
+# footy CLI wrapper: resolve venv, cd to repo root, exec the CLI module.
+set -e
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+VENV="$ROOT/.venv"
+
+if [ ! -x "$VENV/bin/python" ]; then
+    echo "error: virtualenv not found at $VENV" >&2
+    echo "run: python3 -m venv .venv && ./.venv/bin/pip install -r requirements.txt" >&2
+    exit 1
+fi
+
+cd "$ROOT"
+exec "$VENV/bin/python" -m footy.cli "$@"
