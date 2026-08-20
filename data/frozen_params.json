@@ -1,0 +1,227 @@
+{
+  "half_life_days": 365.0,
+  "sigma": 0.35,
+  "pi": [
+    -0.09163905693732838,
+    -0.12682699245220508
+  ],
+  "window_seasons": 6,
+  "rho_bounds": [
+    -0.2,
+    0.2
+  ],
+  "k_max": 12,
+  "refit": "week",
+  "tune_from": 2000,
+  "tune_through": 2011,
+  "created_at": "2026-08-20T16:48:27",
+  "total_fits": 6258,
+  "grid": {
+    "half_life_days": [
+      60.0,
+      90.0,
+      120.0,
+      180.0,
+      250.0,
+      365.0,
+      550.0,
+      800.0,
+      Infinity
+    ],
+    "sigma": [
+      0.15,
+      0.25,
+      0.35,
+      0.5,
+      0.8
+    ],
+    "base_sigma": 0.35
+  },
+  "stage1_half_life": [
+    {
+      "half_life_days": 60.0,
+      "sigma": 0.35,
+      "pi": [
+        0.0,
+        0.0
+      ],
+      "window_seasons": 6,
+      "n": 4560,
+      "n_folds": 447,
+      "rps": 0.20352395910065976,
+      "fit_seconds": 3.1490662235592026
+    },
+    {
+      "half_life_days": 90.0,
+      "sigma": 0.35,
+      "pi": [
+        0.0,
+        0.0
+      ],
+      "window_seasons": 6,
+      "n": 4560,
+      "n_folds": 447,
+      "rps": 0.20116033813852094,
+      "fit_seconds": 3.29739175006398
+    },
+    {
+      "half_life_days": 120.0,
+      "sigma": 0.35,
+      "pi": [
+        0.0,
+        0.0
+      ],
+      "window_seasons": 6,
+      "n": 4560,
+      "n_folds": 447,
+      "rps": 0.1998502499829656,
+      "fit_seconds": 3.3814587079687044
+    },
+    {
+      "half_life_days": 180.0,
+      "sigma": 0.35,
+      "pi": [
+        0.0,
+        0.0
+      ],
+      "window_seasons": 6,
+      "n": 4560,
+      "n_folds": 447,
+      "rps": 0.19853930818493207,
+      "fit_seconds": 3.348145863361424
+    },
+    {
+      "half_life_days": 250.0,
+      "sigma": 0.35,
+      "pi": [
+        0.0,
+        0.0
+      ],
+      "window_seasons": 6,
+      "n": 4560,
+      "n_folds": 447,
+      "rps": 0.19794239142487846,
+      "fit_seconds": 3.4840186421060935
+    },
+    {
+      "half_life_days": 365.0,
+      "sigma": 0.35,
+      "pi": [
+        0.0,
+        0.0
+      ],
+      "window_seasons": 6,
+      "n": 4560,
+      "n_folds": 447,
+      "rps": 0.19771618063593152,
+      "fit_seconds": 3.489618468709523
+    },
+    {
+      "half_life_days": 550.0,
+      "sigma": 0.35,
+      "pi": [
+        0.0,
+        0.0
+      ],
+      "window_seasons": 6,
+      "n": 4560,
+      "n_folds": 447,
+      "rps": 0.19785100685555826,
+      "fit_seconds": 3.574328326882096
+    },
+    {
+      "half_life_days": 800.0,
+      "sigma": 0.35,
+      "pi": [
+        0.0,
+        0.0
+      ],
+      "window_seasons": 6,
+      "n": 4560,
+      "n_folds": 447,
+      "rps": 0.1981218971049096,
+      "fit_seconds": 3.6654041650763247
+    },
+    {
+      "half_life_days": Infinity,
+      "sigma": 0.35,
+      "pi": [
+        0.0,
+        0.0
+      ],
+      "window_seasons": 6,
+      "n": 4560,
+      "n_folds": 447,
+      "rps": 0.19930424044065337,
+      "fit_seconds": 3.7869111319596414
+    }
+  ],
+  "stage2_sigma": [
+    {
+      "half_life_days": 365.0,
+      "sigma": 0.15,
+      "pi": [
+        0.0,
+        0.0
+      ],
+      "window_seasons": 6,
+      "n": 4560,
+      "n_folds": 447,
+      "rps": 0.2011313908579027,
+      "fit_seconds": 3.059065039473353
+    },
+    {
+      "half_life_days": 365.0,
+      "sigma": 0.25,
+      "pi": [
+        0.0,
+        0.0
+      ],
+      "window_seasons": 6,
+      "n": 4560,
+      "n_folds": 447,
+      "rps": 0.19816849035374604,
+      "fit_seconds": 3.299531266791746
+    },
+    {
+      "half_life_days": 365.0,
+      "sigma": 0.35,
+      "pi": [
+        0.0,
+        0.0
+      ],
+      "window_seasons": 6,
+      "n": 4560,
+      "n_folds": 447,
+      "rps": 0.19771618063593152,
+      "fit_seconds": 3.551586047105957
+    },
+    {
+      "half_life_days": 365.0,
+      "sigma": 0.5,
+      "pi": [
+        0.0,
+        0.0
+      ],
+      "window_seasons": 6,
+      "n": 4560,
+      "n_folds": 447,
+      "rps": 0.19780358916852772,
+      "fit_seconds": 3.7540251728205476
+    },
+    {
+      "half_life_days": 365.0,
+      "sigma": 0.8,
+      "pi": [
+        0.0,
+        0.0
+      ],
+      "window_seasons": 6,
+      "n": 4560,
+      "n_folds": 447,
+      "rps": 0.19818777738983986,
+      "fit_seconds": 4.057152059656801
+    }
+  ],
+  "pi_sample_size": 36
+}
