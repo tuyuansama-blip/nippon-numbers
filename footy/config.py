@@ -168,6 +168,13 @@ JPN_OVERROUND_PSC_MIN, JPN_OVERROUND_PSC_MAX = 1.00, 1.10     # check.py 6.7
 JPN_OVERROUND_BFEC_MIN, JPN_OVERROUND_BFEC_MAX = 0.98, 1.05
 JPN_STALENESS_MAX_SEC = 6 * 3600            # odds close_quality gate (8.2-4)
 
+# --- weekly operations pipeline (DESIGN_PHASE2.md 9, 7.5) ---------------------
+PREDICTIONS_DIR = Path(os.environ.get("FOOTY_PREDICTIONS_DIR", ROOT / "predictions"))
+MODEL_VERSION = "footy-ev-phase2-dc-tb-v1"     # bump on any change to the fitting
+                                                # or calibration code path, not on data refresh
+JPN_PUBLISH_MIN_TRAIN_MATCHES = 300            # publish gate (9): training window floor
+PREREGISTERED_TAG_PREFIX = "phase2-preregistered-"   # git tag prefix, 5.3-5
+
 # --- J1 verdict: absolute paired-difference thresholds, not gap_closed -------
 # (DESIGN_PHASE2.md 7.3). The ratios are the same numbers as EPL's gap_closed
 # table (0.75/0.60/... in DESIGN.md 3) mapped onto J1's own measured span;

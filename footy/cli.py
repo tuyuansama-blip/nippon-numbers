@@ -351,6 +351,74 @@ def cmd_odds_schedule(args) -> int:
     return 0
 
 
+def cmd_predict(args) -> int:
+    """`footy predict --league jpn1 --round next` (DESIGN_PHASE2.md 9, 7.5)."""
+    import pandas as pd
+
+    from footy.eval.tune import load_frozen_params
+    from footy.pipeline.predict import generate_prediction, write_prediction
+
+    matches_path = args.matches or "data/matches_jpn1.parquet"
+    matches = pd.read_parquet(matches_path)
+    frozen = load_frozen_params(args.params)
+    if not frozen:
+        print("error: data/frozen_params.json not found -- run `footy tune` first",
+              file=sys.stderr)
+        return 2
+
+    result = generate_prediction(
+        matches_history=matches, frozen=frozen, snapshot_dir=args.snapshot_dir,
+    )
+    if not result["ok"]:
+        print(f"error: {result['reason']}", file=sys.stderr)
+        return 2
+
+    payload = result["payload"]
+    gate = payload["publish_gate"]
+    print(
+        f"round {payload['round_id']} ({payload['season_label']}): "
+        f"{len(payload['matches'])} fixture(s)"
+    )
+    phi = payload["phi"]
+    print(
+        f"  phi: temperature={phi['temperature']:.4f} phi_home={phi['phi_home']:.4f} "
+        f"phi_draw={phi['phi_draw']:.4f} (n_history={phi['n_history']}, warm={phi['warm']})"
+    )
+    print(f"  training window: {payload['training_window']['n_matches']} matches")
+    print(f"  params_hash: {payload['params_hash']} ({payload['params_hash_check']['note']})")
+
+    if not gate["ok"]:
+        print("publish gate BLOCKED -- no prediction file written:", file=sys.stderr)
+        for reason in gate["reasons"]:
+            print(f"  - {reason}", file=sys.stderr)
+        return 1
+
+    json_path, md_path = write_prediction(payload, predictions_dir=args.predictions_dir)
+    print(f"written: {json_path}")
+    print(f"written: {md_path}")
+    return 0
+
+
+def cmd_weekly(args) -> int:
+    """`footy weekly` -- runs the DESIGN_PHASE2.md 9 pipeline steps due today
+    (JST), or exactly `--steps` when given."""
+    from footy.pipeline.weekly import run_weekly
+
+    result = run_weekly(steps=args.steps, dry_run_publish=not args.publish)
+    for step in result.get("steps_run", []):
+        payload = result.get(step, {})
+        ok = payload.get("ok") if isinstance(payload, dict) else None
+        note = payload.get("reason") or payload.get("note") or ""
+        print(f"[{step}] ok={ok}" + (f"  {note}" if note else ""))
+    if "stopped_after" in result:
+        print(f"stopped after: {result['stopped_after']}")
+    failed = [
+        s for s in result.get("steps_run", [])
+        if isinstance(result.get(s), dict) and result[s].get("ok") is False
+    ]
+    return 1 if failed else 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="footy", description=__doc__)
     parser.add_argument("--matches", default=None, help="path to matches.parquet")
@@ -424,6 +492,27 @@ def build_parser() -> argparse.ArgumentParser:
     odds_schedule.add_argument("--snapshot-dir", dest="snapshot_dir", default=None)
     odds_schedule.add_argument("--dry-run", action="store_true")
     odds_schedule.set_defaults(func=cmd_odds_schedule)
+
+    predict = sub.add_parser(
+        "predict", help="next-round J1 predictions (DESIGN_PHASE2.md 9, 7.5)"
+    )
+    predict.add_argument("--league", choices=("jpn1",), default="jpn1")
+    predict.add_argument("--round", choices=("next",), default="next")
+    predict.add_argument("--params", default=None, help="frozen_params.json")
+    predict.add_argument("--snapshot-dir", dest="snapshot_dir", default=None)
+    predict.add_argument("--predictions-dir", dest="predictions_dir", default=None)
+    predict.set_defaults(func=cmd_predict)
+
+    weekly = sub.add_parser("weekly", help="run the weekly pipeline (DESIGN_PHASE2.md 9)")
+    weekly.add_argument(
+        "--steps", nargs="+", default=None,
+        help="run exactly these steps instead of today's weekday schedule",
+    )
+    weekly.add_argument(
+        "--publish", action="store_true",
+        help="actually git-commit/tag the publish step (default: dry-run)",
+    )
+    weekly.set_defaults(func=cmd_weekly)
     return parser
 
 
