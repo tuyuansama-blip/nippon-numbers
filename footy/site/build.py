@@ -48,6 +48,20 @@ def _fmt_utc(value: str | None) -> str:
     return dt.strftime("%Y-%m-%d %H:%M UTC")
 
 
+def _fmt_kickoff(value: str | None) -> str:
+    """Compact per-row kickoff for the fixtures table: `"Aug 21 10:00"`.
+    The year and the UTC marker live once in the table caption instead of
+    being repeated on every row, so the probability columns keep their room
+    on narrow screens."""
+    if not value:
+        return "-"
+    try:
+        dt = datetime.fromisoformat(value)
+    except ValueError:
+        return value
+    return dt.strftime("%b %d %H:%M")
+
+
 def _fmt_pct(value, digits: int = 1) -> str:
     if value is None:
         return "-"
@@ -62,6 +76,7 @@ def _env() -> Environment:
         lstrip_blocks=True,
     )
     env.filters["fmt_utc"] = _fmt_utc
+    env.filters["fmt_kickoff"] = _fmt_kickoff
     env.filters["fmt_pct"] = _fmt_pct
     return env
 

@@ -3,20 +3,15 @@
 {% block description %}Pre-kickoff win/draw/loss probabilities for {{ round_label }}, fixed before the matches were played and never edited afterwards.{% endblock %}
 {% block content %}
 
-<h1>{{ round_label }}</h1>
-<p class="lede">Match probabilities for Japan's J1 League. {{ payload.matches|length }} fixtures, fixed before kickoff.</p>
-
-<div class="callout">
-  <p><strong>The market is measurably better than this model.</strong> Over {{ '{:,}'.format(run.n_matches) }} backtested J1 matches ({{ run.season_from }}&ndash;{{ run.season_to }}), the closing betting market scored {{ '%.4f'|format(run.d_rps) }} RPS points better than this model on average (95% CI [{{ '%.4f'|format(run.d_rps_ci_lo) }}, {{ '%.4f'|format(run.d_rps_ci_hi) }}]) &mdash; see <a href="methodology.html">Methodology</a>. A disagreement with the market below is a question, not an answer: this model has no information the market lacks. It does not see injuries, lineups, suspensions or travel.</p>
-</div>
-
-<h2>Fixtures</h2>
+<h1 class="page-title">{{ round_label }}</h1>
+<p class="lede">Match probabilities for Japan's J1 League. {{ payload.matches|length }} fixtures, fixed before kickoff.
+<span class="callout--inline"><strong>The market is measurably better than this model</strong> &mdash; a disagreement below is a question, not an answer. <a href="methodology.html">Full caveat &amp; numbers</a>.</span></p>
 <div class="table-scroll">
 <table>
-<caption>Calibrated model probabilities. No market odds are shown here &mdash; see Methodology for why.</caption>
+<caption>Calibrated model probabilities. Kickoff times are UTC, {{ payload.matches[0].commence_time[:4] }}. No market odds are shown here &mdash; see Methodology for why.</caption>
 <thead>
 <tr>
-  <th scope="col">Kickoff (UTC)</th>
+  <th scope="col">Kickoff</th>
   <th scope="col">Home</th>
   <th scope="col">Away</th>
   <th scope="col" class="num">P(H)</th>
@@ -27,13 +22,14 @@
 </thead>
 <tbody>
 {% for m in payload.matches %}
+{% set pmax = [m.p_calibrated.h, m.p_calibrated.d, m.p_calibrated.a]|max %}
 <tr>
-  <td>{{ m.commence_time|fmt_utc }}</td>
+  <td>{{ m.commence_time|fmt_kickoff }}</td>
   <td>{{ m.home_team }}</td>
   <td>{{ m.away_team }}</td>
-  <td class="num">{{ m.p_calibrated.h|fmt_pct }}</td>
-  <td class="num">{{ m.p_calibrated.d|fmt_pct }}</td>
-  <td class="num">{{ m.p_calibrated.a|fmt_pct }}</td>
+  <td class="num{% if m.p_calibrated.h == pmax %} num--max{% endif %}">{{ m.p_calibrated.h|fmt_pct }}</td>
+  <td class="num{% if m.p_calibrated.d == pmax %} num--max{% endif %}">{{ m.p_calibrated.d|fmt_pct }}</td>
+  <td class="num{% if m.p_calibrated.a == pmax %} num--max{% endif %}">{{ m.p_calibrated.a|fmt_pct }}</td>
   <td>
     {% if m.result %}
     {{ m.result.fthg|int }}&ndash;{{ m.result.ftag|int }} ({{ m.result.ftr }})
@@ -57,6 +53,10 @@
   See <a href="record.html">Track Record</a> for the cumulative, non-backtest picture.
 </p>
 {% endif %}
+
+<div class="callout">
+  <p>Over {{ '{:,}'.format(run.n_matches) }} backtested J1 matches ({{ run.season_from }}&ndash;{{ run.season_to }}), the closing betting market scored {{ '%.4f'|format(run.d_rps) }} RPS points better than this model on average (95% CI [{{ '%.4f'|format(run.d_rps_ci_lo) }}, {{ '%.4f'|format(run.d_rps_ci_hi) }}]) &mdash; see <a href="methodology.html">Methodology</a>. This model has no information the market lacks: it does not see injuries, lineups, suspensions or travel. The bold figure in each row is only the most likely of three outcomes, not advice &mdash; in most football matches the most likely single outcome still loses more often than it wins.</p>
+</div>
 
 <details class="meta-details">
   <summary><h2>Metadata &amp; verification</h2></summary>
