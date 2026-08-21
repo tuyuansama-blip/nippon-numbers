@@ -3,12 +3,15 @@
 Every step below is a small, independently callable, idempotent function
 (9: "すべて冪等・再実行可能...各段は独立にも走る"); `run_weekly` just
 sequences the ones due on a given JST weekday and stops early exactly where
-9's failure-mode column says to. Nothing here touches the network:
-`step_fetch` only re-reads what `footy.data.source_fd_new.fetch_jpn_csv`
-already has cached, `step_predict` only reads cached odds snapshots, and
-`step_publish`/`step_stamp` default to `dry_run=True`/no-network so calling
-`run_weekly` from a test never mutates the real git repository or hits an
-OpenTimestamps calendar.
+9's failure-mode column says to. Nothing here touches the network *except*
+`step_scores` (see below): `step_fetch` only re-reads what
+`footy.data.source_fd_new.fetch_jpn_csv` already has cached, `step_predict`
+only reads cached odds snapshots, and `step_publish`/`step_stamp` default to
+`dry_run=True`/no-network so calling `run_weekly` from a test never mutates
+the real git repository or hits an OpenTimestamps calendar. `step_scores`
+only reaches the network when its caller doesn't already hand it
+`score_events` -- exactly how the test suite drives it without violating
+DESIGN.md 4.
 
 **`stamp` moved from monthly to per-round, at `publish` time.**
 DESIGN_PHASE2.md 9 originally put it in a once-a-month batch; DESIGN_SITE.md
@@ -18,6 +21,18 @@ kickoff) and 3.2 replaces it with one stamp per round taken alongside
 `publish`. `step_stamp` here follows a round straight out of `step_publish`
 rather than being driven off a day-of-month check.
 
+**`scores` is the one step here that touches the network.** Every other
+step below is cache-only, as the paragraph after this table says. `scores`
+(Fri/Sat/Sun nights, when this round's matches are actually being played) is
+the exception: it calls The Odds API's `/scores` endpoint
+(`footy/odds/scores.py`, 2 credits/call) to write same-night *provisional*
+results, ahead of football-data.co.uk's confirmed ones that Monday's
+`reconcile` eventually overwrites them with. A missing `ODDS_API_KEY`, or
+the call itself failing, is a warning (`ok=True`, a `note`), never a stop
+-- a quiet night for this step just means the site shows "not yet played"
+a little longer, never a wrong result, since Monday's `reconcile` is still
+the one source of truth.
+
 | 曜日(JST) | 段 | この実装 |
 |---|---|---|
 | 月 09:00 | fetch | `step_fetch` |
@@ -26,6 +41,7 @@ rather than being driven off a day-of-month check.
 | 月 09:30 | report --rolling | `step_report` |
 | 木 12:00 | predict | `step_predict` |
 | 木 12:05 | publish (+ per-round stamp) | `step_publish`, `step_stamp` |
+| 金-日 夜 | scores (暫定結果) | `step_scores` |
 | 月次 | audit | `step_audit` |
 
 (火-木 の `odds` cron は `footy.pipeline.odds_schedule.run_schedule` -- it
@@ -46,6 +62,9 @@ from footy.config import DATA_DIR, JPN_DIV, PREDICTIONS_DIR, REPORTS_DIR
 WEEKDAY_STEPS = {
     0: ("fetch", "reconcile", "calibrate", "report"),   # Monday
     3: ("predict", "publish", "stamp"),                 # Thursday
+    4: ("scores",),                                     # Friday night
+    5: ("scores",),                                     # Saturday night
+    6: ("scores",),                                     # Sunday night
 }
 MONTHLY_STEPS = ("audit",)
 
@@ -83,11 +102,25 @@ def step_fetch(*, raw_dir=None, out_path=None) -> dict:
 
 
 def step_reconcile(*, matches_history=None, predictions_dir=None, matches_path=None) -> dict:
+    """Confirms whatever football-data now has scored, including upgrading
+    any same-night `scores` provisional result to confirmed. A confirmation
+    that disagrees with its provisional guess is never hidden: it is kept in
+    the prediction file as `result.discrepancy` (`reconcile.py`'s module
+    docstring) and surfaced here as `note` so it shows up in `footy weekly`'s
+    printed step summary too."""
     from footy.pipeline.reconcile import reconcile
 
     matches = matches_history if matches_history is not None else _load_j1_matches(matches_path)
     result = reconcile(matches, predictions_dir=predictions_dir)
-    return {"ok": True, **result}
+    note = None
+    discrepancies = result.get("discrepancies") or []
+    if discrepancies:
+        note = (
+            f"{len(discrepancies)} score discrepancy(ies) between the odds-api "
+            "provisional result and football-data's confirmed one -- see "
+            "result.discrepancy in the affected prediction file(s)"
+        )
+    return {"ok": True, **result, **({"note": note} if note else {})}
 
 
 def step_calibrate(*, matches_history=None, frozen=None, matches_path=None, out_path=None) -> dict:
@@ -228,6 +261,48 @@ def step_stamp(*, predict_result: dict) -> dict:
         return {"ok": False, "reason": str(exc)}
 
 
+# --- Friday/Saturday/Sunday night ---------------------------------------------
+def step_scores(*, score_events=None, predictions_dir=None, days_from: int = 3) -> dict:
+    """Same-night provisional results (`footy/odds/scores.py`'s module
+    docstring): The Odds API's `/scores`, ahead of Monday's football-data
+    confirmation. The one genuinely network-touching step in this module
+    (see the module docstring) -- and even then, only when `score_events`
+    isn't already supplied. A missing `ODDS_API_KEY` or a failed fetch is a
+    warning, not a stop (9: "失敗は警告のみ"): Monday's `reconcile` is the
+    real source of truth regardless of how this step goes.
+
+    `score_events`, when given, skips the network call entirely and applies
+    exactly this pre-fetched `/scores` response instead -- what the test
+    suite passes so this step can be exercised without touching the network
+    (DESIGN.md 4)."""
+    from footy.odds.scores import apply_provisional_to_dir, fetch_scores
+
+    if score_events is None:
+        import os
+
+        from footy.pipeline.odds_schedule import ApiKeyFetcher
+
+        api_key = os.environ.get("ODDS_API_KEY")
+        if not api_key:
+            return {
+                "ok": True, "updated_files": [], "warnings": [],
+                "note": "ODDS_API_KEY not set -- skipped",
+            }
+        try:
+            score_events = fetch_scores(ApiKeyFetcher(api_key), days_from=days_from)
+        except Exception as exc:                  # 9: "失敗は警告のみ"
+            return {
+                "ok": True, "updated_files": [], "warnings": [],
+                "note": f"fetch failed: {exc}",
+            }
+
+    result = apply_provisional_to_dir(score_events, predictions_dir=predictions_dir)
+    note = None
+    if result["warnings"]:
+        note = f"{len(result['warnings'])} unresolved team spelling(s) skipped"
+    return {"ok": True, **result, **({"note": note} if note else {})}
+
+
 # --- monthly ------------------------------------------------------------------
 def step_audit(*, frozen=None, matches_history=None, repo_root=None) -> dict:
     """Light-weight audit: params_hash-vs-preregistration-tag and a phi
@@ -255,7 +330,7 @@ def step_audit(*, frozen=None, matches_history=None, repo_root=None) -> dict:
 STEP_FUNCS = {
     "fetch": step_fetch, "reconcile": step_reconcile, "calibrate": step_calibrate,
     "report": step_report, "predict": step_predict, "publish": step_publish,
-    "stamp": step_stamp, "audit": step_audit,
+    "stamp": step_stamp, "scores": step_scores, "audit": step_audit,
 }
 
 
@@ -263,7 +338,7 @@ def run_weekly(
     *, steps=None, weekday: int | None = None, day_of_month: int | None = None,
     dry_run_publish: bool = True, repo_root=None, snapshot_dir=None,
     matches_path=None, predictions_dir=None, raw_dir=None,
-    frozen=None, matches_history=None, asof_utc=None,
+    frozen=None, matches_history=None, asof_utc=None, score_events=None,
 ) -> dict:
     """Run whichever steps are due. `steps`, if given, overrides the
     weekday/day-of-month gating entirely (used by `footy weekly --steps ...`
@@ -275,7 +350,8 @@ def run_weekly(
     `data/matches_jpn1.parquet` -- production never passes these (each step
     is meant to read the current on-disk state), but a test driving the
     whole orchestrator on synthetic data needs to inject both rather than
-    touch the real repository's files."""
+    touch the real repository's files. `score_events`, similarly, is what a
+    test hands `step_scores` instead of letting it reach The Odds API."""
     if steps is None:
         now = pd.Timestamp.now(tz="Asia/Tokyo")
         weekday = now.weekday() if weekday is None else weekday
@@ -314,6 +390,8 @@ def run_weekly(
             )
         elif step == "stamp":
             report[step] = step_stamp(predict_result=predict_result or {"ok": False})
+        elif step == "scores":
+            report[step] = step_scores(score_events=score_events, predictions_dir=predictions_dir)
         elif step == "audit":
             report[step] = step_audit(frozen=frozen, repo_root=repo_root)
         else:

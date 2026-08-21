@@ -181,6 +181,44 @@ def test_render_index_shows_result_once_reconciled():
     assert "Round result" in html
 
 
+def test_render_index_marks_a_provisional_result():
+    payload = _payload(n=1)
+    payload["matches"][0]["result"] = {
+        "fthg": 4.0, "ftag": 2.0, "ftr": "H", "y": 0,
+        "rps_raw": 0.1, "rps_cal": 0.09, "ll_raw": 0.5, "ll_cal": 0.4,
+        "source": "odds_api_provisional", "fetched_at": "2026-08-21T12:00:00+00:00",
+    }
+    html = render_index(payload, "hash")
+    assert "4–2 (H)" in html or "4-2 (H)" in html or "4&ndash;2 (H)" in html
+    assert "provisional" in html
+
+
+def test_render_index_confirmed_result_has_no_provisional_marker():
+    payload = _payload(n=1)
+    payload["matches"][0]["result"] = {
+        "fthg": 2.0, "ftag": 1.0, "ftr": "H", "y": 0,
+        "rps_raw": 0.1, "rps_cal": 0.09, "ll_raw": 0.5, "ll_cal": 0.4,
+        "source": "football_data",
+    }
+    html = render_index(payload, "hash")
+    assert "provisional" not in html
+
+
+def test_render_index_shows_a_discrepancy_instead_of_hiding_it():
+    payload = _payload(n=1)
+    payload["matches"][0]["result"] = {
+        "fthg": 1.0, "ftag": 0.0, "ftr": "H", "y": 0,
+        "rps_raw": 0.1, "rps_cal": 0.09, "ll_raw": 0.5, "ll_cal": 0.4,
+        "source": "football_data",
+        "discrepancy": {
+            "odds_api_provisional": {"fthg": 2.0, "ftag": 0.0, "ftr": "H"},
+            "football_data": {"fthg": 1.0, "ftag": 0.0, "ftr": "H"},
+        },
+    }
+    html = render_index(payload, "hash")
+    assert "discrepancy" in html
+
+
 # --- methodology.html ---------------------------------------------------------
 def test_render_methodology_cites_confirmation_run():
     html = render_methodology()
@@ -215,6 +253,16 @@ def test_render_record_below_threshold_says_too_few_matches():
     html = render_record(track, first_round_id="2026-08-21")
     assert "Too few matches to mean anything yet" in html
     assert "n = 1" in html
+
+
+def test_render_record_counts_provisional_results_and_says_so():
+    track = pd.DataFrame([
+        {"round_id": "2026-08-21", "rps_raw": 0.2, "rps_cal": 0.19, "source": "odds_api_provisional"},
+        {"round_id": "2026-08-21", "rps_raw": 0.1, "rps_cal": 0.12, "source": "football_data"},
+    ])
+    html = render_record(track, first_round_id="2026-08-21")
+    assert "2 matches" in html
+    assert "1 provisional" in html
 
 
 def test_render_record_never_mixes_backtest_and_live_in_one_number():

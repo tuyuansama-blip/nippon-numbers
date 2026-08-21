@@ -170,3 +170,89 @@ def test_reconcile_on_a_missing_predictions_dir_is_a_noop(tmp_path):
     result = reconcile(pd.DataFrame(columns=["date", "home_id", "away_id", "fthg", "ftag", "ftr"]),
                         predictions_dir=tmp_path / "does_not_exist")
     assert result == {"updated_files": [], "track_record_rows": 0, "track_record_path": None}
+
+
+# --- two-stage results (odds-api provisional -> football-data confirmed) -------
+def test_build_track_record_carries_the_source_of_each_result(tmp_path):
+    payload = _payload([
+        _match("h1", "a1", "Home FC", "Away FC", "2024-05-03T10:00:00+00:00",
+               (0.5, 0.3, 0.2), (0.5, 0.3, 0.2)),
+    ])
+    payload["matches"][0]["result"] = {
+        "fthg": 2.0, "ftag": 0.0, "ftr": "H", "y": 0,
+        "rps_raw": 0.09, "rps_cal": 0.09, "ll_raw": 0.5, "ll_cal": 0.5,
+        "source": "odds_api_provisional", "fetched_at": "2024-05-03T12:00:00+00:00",
+    }
+    (tmp_path / "j1_2024_2024-05-03.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    track = build_track_record(tmp_path)
+    assert list(track["source"]) == ["odds_api_provisional"]
+
+
+def test_build_track_record_defaults_source_to_football_data_for_legacy_results(tmp_path):
+    payload = _payload([
+        _match("h1", "a1", "Home FC", "Away FC", "2024-05-03T10:00:00+00:00",
+               (0.5, 0.3, 0.2), (0.5, 0.3, 0.2)),
+    ])
+    payload["matches"][0]["result"] = {
+        "fthg": 2.0, "ftag": 0.0, "ftr": "H", "y": 0,
+        "rps_raw": 0.09, "rps_cal": 0.09, "ll_raw": 0.5, "ll_cal": 0.5,
+    }
+    (tmp_path / "j1_2024_2024-05-03.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    track = build_track_record(tmp_path)
+    assert list(track["source"]) == ["football_data"]
+
+
+def test_reconcile_end_to_end_upgrades_a_provisional_result_and_reports_no_discrepancy(tmp_path):
+    payload = _payload([
+        _match("h1", "a1", "Home FC", "Away FC", "2024-05-03T10:00:00+00:00",
+               (0.5, 0.3, 0.2), (0.55, 0.25, 0.20)),
+    ])
+    payload["matches"][0]["result"] = {
+        "fthg": 2.0, "ftag": 0.0, "ftr": "H", "y": 0,
+        "rps_raw": 0.09, "rps_cal": 0.09, "ll_raw": 0.5, "ll_cal": 0.5,
+        "source": "odds_api_provisional", "fetched_at": "2024-05-03T12:00:00+00:00",
+    }
+    path = tmp_path / "j1_2024_2024-05-03.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    matches_history = _matches_history([
+        {"date": pd.Timestamp("2024-05-03"), "home_id": "h1", "away_id": "a1",
+         "fthg": 2.0, "ftag": 0.0, "ftr": "H"},
+    ])
+    result = reconcile(matches_history, predictions_dir=tmp_path)
+    assert result["updated_files"] == [path.name]
+    assert result["discrepancies"] == []
+
+    written = json.loads(path.read_text(encoding="utf-8"))
+    assert written["matches"][0]["result"]["source"] == "football_data"
+
+
+def test_reconcile_surfaces_a_discrepancy_between_provisional_and_confirmed_scores(tmp_path):
+    payload = _payload([
+        _match("h1", "a1", "Home FC", "Away FC", "2024-05-03T10:00:00+00:00",
+               (0.5, 0.3, 0.2), (0.55, 0.25, 0.20)),
+    ])
+    payload["matches"][0]["result"] = {
+        "fthg": 2.0, "ftag": 0.0, "ftr": "H", "y": 0,
+        "rps_raw": 0.09, "rps_cal": 0.09, "ll_raw": 0.5, "ll_cal": 0.5,
+        "source": "odds_api_provisional", "fetched_at": "2024-05-03T12:00:00+00:00",
+    }
+    path = tmp_path / "j1_2024_2024-05-03.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    # football-data disagrees with the earlier provisional guess.
+    matches_history = _matches_history([
+        {"date": pd.Timestamp("2024-05-03"), "home_id": "h1", "away_id": "a1",
+         "fthg": 1.0, "ftag": 0.0, "ftr": "H"},
+    ])
+    result = reconcile(matches_history, predictions_dir=tmp_path)
+    assert len(result["discrepancies"]) == 1
+    discrepancy = result["discrepancies"][0]
+    assert discrepancy["odds_api_provisional"]["fthg"] == 2.0
+    assert discrepancy["football_data"]["fthg"] == 1.0
+
+    written = json.loads(path.read_text(encoding="utf-8"))
+    assert written["matches"][0]["result"]["fthg"] == 1.0    # confirmed wins
+    assert written["matches"][0]["result"]["discrepancy"] is not None

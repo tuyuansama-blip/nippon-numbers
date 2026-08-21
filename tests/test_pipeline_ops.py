@@ -21,6 +21,7 @@ from footy.pipeline.weekly import (
     step_predict,
     step_publish,
     step_reconcile,
+    step_scores,
     step_stamp,
 )
 from tests.j1_world import build_world, write_snapshot
@@ -171,6 +172,84 @@ def test_run_weekly_thursday_flow_with_injected_data(world, tmp_path):
     assert report["publish"]["ok"] is True
     assert report["stamp"]["ok"] is True
     assert report["steps_run"] == ["predict", "publish", "stamp"]
+
+
+def _write_pending_prediction(path, *, event_id="evt1", home="Kashiwa Reysol",
+                               away="V-Varen Nagasaki", commence="2026-08-21T10:00:00+00:00"):
+    payload = {
+        "schema_version": 1, "league": "jpn1", "season": 2026, "season_label": "2026-27",
+        "round_id": "2026-08-21", "generated_at": "2026-08-20T10:00:00+00:00",
+        "asof": "2026-08-20T10:00:00+00:00", "model_version": "test-v1",
+        "params_hash": "deadbeef",
+        "matches": [{
+            "event_id": event_id, "commence_time": commence,
+            "home_team": home, "away_team": away,
+            "home_id": "jpn_1:x", "away_id": "jpn_1:y",
+            "p_raw": {"h": 0.5, "d": 0.25, "a": 0.25},
+            "p_calibrated": {"h": 0.5, "d": 0.25, "a": 0.25},
+            "result": None,
+        }],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return payload
+
+
+def _kashiwa_score_events():
+    return [{
+        "id": "evt1", "sport_key": "soccer_japan_j_league",
+        "commence_time": "2026-08-21T10:00:00Z", "completed": True,
+        "home_team": "Kashiwa Reysol", "away_team": "V-Varen Nagasaki",
+        "scores": [
+            {"name": "Kashiwa Reysol", "score": "4"},
+            {"name": "V-Varen Nagasaki", "score": "2"},
+        ],
+    }]
+
+
+# --- scores (Friday/Saturday/Sunday night, DESIGN_PHASE2.md 9 + the odds-api
+# provisional-results extension) ------------------------------------------------
+def test_weekday_table_puts_scores_on_friday_saturday_sunday_nights():
+    assert WEEKDAY_STEPS[4] == ("scores",)
+    assert WEEKDAY_STEPS[5] == ("scores",)
+    assert WEEKDAY_STEPS[6] == ("scores",)
+
+
+def test_step_scores_applies_injected_score_events_without_touching_the_network(tmp_path):
+    predictions_dir = tmp_path / "predictions"
+    predictions_dir.mkdir()
+    path = predictions_dir / "j1_2026_2026-08-21.json"
+    _write_pending_prediction(path)
+
+    result = step_scores(score_events=_kashiwa_score_events(), predictions_dir=predictions_dir)
+    assert result["ok"] is True
+    assert result["updated_files"] == [path.name]
+
+    written = json.loads(path.read_text(encoding="utf-8"))
+    match_result = written["matches"][0]["result"]
+    assert match_result["fthg"] == 4.0 and match_result["ftag"] == 2.0
+    assert match_result["source"] == "odds_api_provisional"
+
+
+def test_step_scores_is_a_soft_noop_without_an_api_key(tmp_path, monkeypatch):
+    monkeypatch.delenv("ODDS_API_KEY", raising=False)
+    result = step_scores(predictions_dir=tmp_path / "predictions")
+    assert result["ok"] is True
+    assert result["updated_files"] == []
+    assert "ODDS_API_KEY" in result["note"]
+
+
+def test_run_weekly_scores_step_with_injected_score_events(tmp_path):
+    predictions_dir = tmp_path / "predictions"
+    predictions_dir.mkdir()
+    path = predictions_dir / "j1_2026_2026-08-21.json"
+    _write_pending_prediction(path)
+
+    report = run_weekly(
+        steps=["scores"], predictions_dir=predictions_dir, score_events=_kashiwa_score_events(),
+    )
+    assert report["scores"]["ok"] is True
+    assert report["scores"]["updated_files"] == [path.name]
+    assert report["steps_run"] == ["scores"]
 
 
 def test_run_weekly_stops_after_a_red_fetch(tmp_path, monkeypatch):

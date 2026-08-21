@@ -14,7 +14,7 @@
 
 <h2>Live record</h2>
 {% if first_round_id %}
-<p>Recording began with the round published on {{ first_round_id }}. Every prediction in it was written to a file and committed before its matches kicked off; results are added afterwards, in a separate step, to a <code>result</code> field that starts as <code>null</code> and is filled in once &mdash; the probabilities themselves are never edited.</p>
+<p>Recording began with the round published on {{ first_round_id }}. Every prediction in it was written to a file and committed before its matches kicked off; results are added afterwards, in a separate step, to a <code>result</code> field that starts as <code>null</code> &mdash; the probabilities themselves are never edited. A same-night result from The Odds API is marked <em>provisional</em> until football-data.co.uk's confirmed score replaces it; if the two ever disagree, both readings are kept, not hidden.</p>
 {% else %}
 <p>No predictions have been published yet.</p>
 {% endif %}
@@ -25,7 +25,8 @@
 {% else %}
 <p>
   <strong>{{ live.n }} match{{ 'es' if live.n != 1 else '' }}</strong> resolved
-  across {{ live.rounds }} round{{ 's' if live.rounds != 1 else '' }}.
+  across {{ live.rounds }} round{{ 's' if live.rounds != 1 else '' }}
+  {% if live.n_provisional %}({{ live.n_provisional }} provisional){% endif %}.
   Mean RPS (calibrated): {{ '%.4f'|format(live.mean_rps_cal) }}.
 </p>
 <p class="notice">

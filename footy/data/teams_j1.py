@@ -21,6 +21,7 @@ ODDS_API_ALIASES: dict[str, str] = {
     "Kyoto Purple Sanga": "Kyoto",
     "Urawa Red Diamonds": "Urawa Reds",
     "JEF United Chiba": "Chiba",
+    "JEF United Ichihara-Chiba": "Chiba",
     "Mito HollyHock": "Mito",
     "Fagiano Okayama": "Okayama",
     "FC Machida Zelvia": "Machida",

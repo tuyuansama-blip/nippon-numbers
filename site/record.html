@@ -33,10 +33,22 @@
 </p>
 
 <h2>Live record</h2>
-<p>Recording began with the round published on 2026-08-21. Every prediction in it was written to a file and committed before its matches kicked off; results are added afterwards, in a separate step, to a <code>result</code> field that starts as <code>null</code> and is filled in once &mdash; the probabilities themselves are never edited.</p>
+<p>Recording began with the round published on 2026-08-21. Every prediction in it was written to a file and committed before its matches kicked off; results are added afterwards, in a separate step, to a <code>result</code> field that starts as <code>null</code> &mdash; the probabilities themselves are never edited. A same-night result from The Odds API is marked <em>provisional</em> until football-data.co.uk's confirmed score replaces it; if the two ever disagree, both readings are kept, not hidden.</p>
 
 <div class="card">
-<p><strong>0 matches reconciled yet.</strong> This round's fixtures have not been played (or their results have not yet been fetched and matched back to the prediction file). Check back after kickoff.</p>
+<p>
+  <strong>2 matches</strong> resolved
+  across 1 round
+(2 provisional).
+  Mean RPS (calibrated): 0.1076.
+</p>
+<p class="notice">
+  Too few matches to mean anything yet (n = 2, threshold n =
+  200). At this sample size the uncertainty on any summary
+  statistic swamps the statistic itself. This model is not touched while
+  that is true &mdash; changing it in response to early results would
+  invalidate the pre-registration the rest of this site relies on.
+</p>
 </div>
 
 <h2>Backtest (2014&ndash;2025, reference only)</h2>

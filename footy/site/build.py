@@ -155,13 +155,23 @@ def render_methodology(*, env: Environment | None = None) -> str:
 
 
 def _live_record_summary(track: pd.DataFrame) -> dict:
+    """Counts a same-night provisional result (`source:
+    "odds_api_provisional"`) toward the live total same as a confirmed one
+    -- the point of the two-stage pipeline is that the site doesn't have to
+    wait for football-data to say "not yet played" -- but keeps
+    `n_provisional` alongside it so the record page can say so rather than
+    quietly blend the two (DESIGN_PHASE2.md 9: warn, don't hide). Tolerates
+    a `track` with no `source` column (older callers, and this module's own
+    pre-two-stage tests): that means everything in it is confirmed."""
     if track.empty:
-        return {"n": 0, "rounds": 0, "mean_rps_raw": None, "mean_rps_cal": None}
+        return {"n": 0, "rounds": 0, "mean_rps_raw": None, "mean_rps_cal": None, "n_provisional": 0}
+    source = track["source"] if "source" in track.columns else pd.Series("football_data", index=track.index)
     return {
         "n": int(len(track)),
         "rounds": int(track["round_id"].nunique()),
         "mean_rps_raw": float(track["rps_raw"].mean()),
         "mean_rps_cal": float(track["rps_cal"].mean()),
+        "n_provisional": int((source == "odds_api_provisional").sum()),
     }
 
 

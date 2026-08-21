@@ -33,6 +33,12 @@
   <td>
     {% if m.result %}
     {{ m.result.fthg|int }}&ndash;{{ m.result.ftag|int }} ({{ m.result.ftr }})
+    {% if m.result.source == "odds_api_provisional" %}
+    &middot; provisional
+    {% endif %}
+    {% if m.result.discrepancy %}
+    <span class="badge badge--warn" title="odds-api provisional said {{ m.result.discrepancy.odds_api_provisional.fthg|int }}&ndash;{{ m.result.discrepancy.odds_api_provisional.ftag|int }} ({{ m.result.discrepancy.odds_api_provisional.ftr }}); football-data confirmed {{ m.result.discrepancy.football_data.fthg|int }}&ndash;{{ m.result.discrepancy.football_data.ftag|int }} ({{ m.result.discrepancy.football_data.ftr }})">discrepancy</span>
+    {% endif %}
     {% else %}
     not yet played
     {% endif %}

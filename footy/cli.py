@@ -351,6 +351,35 @@ def cmd_odds_schedule(args) -> int:
     return 0
 
 
+def cmd_odds_scores(args) -> int:
+    """`footy odds scores` -- the provisional half of the two-stage results
+    pipeline (footy/odds/scores.py's module docstring). 2 credits/call."""
+    import os
+
+    from footy.odds.scores import apply_provisional_to_dir, fetch_scores
+    from footy.pipeline.odds_schedule import ApiKeyFetcher
+
+    api_key = os.environ.get("ODDS_API_KEY")
+    if not api_key:
+        print("error: ODDS_API_KEY not set", file=sys.stderr)
+        return 2
+
+    fetcher = ApiKeyFetcher(api_key)
+    events = fetch_scores(fetcher, days_from=args.days_from)
+    completed = [e for e in events if e.get("completed")]
+    print(f"scores: {len(events)} event(s) returned, {len(completed)} completed")
+
+    result = apply_provisional_to_dir(
+        events, predictions_dir=args.predictions_dir,
+        warn=lambda message: print(f"  warning: {message}", file=sys.stderr),
+    )
+    for name in result["updated_files"]:
+        print(f"updated: {name}")
+    if not result["updated_files"]:
+        print("no matching unresolved fixtures found")
+    return 0
+
+
 def cmd_predict(args) -> int:
     """`footy predict --league jpn1 --round next` (DESIGN_PHASE2.md 9, 7.5)."""
     import pandas as pd
@@ -510,6 +539,13 @@ def build_parser() -> argparse.ArgumentParser:
     odds_schedule.add_argument("--snapshot-dir", dest="snapshot_dir", default=None)
     odds_schedule.add_argument("--dry-run", action="store_true")
     odds_schedule.set_defaults(func=cmd_odds_schedule)
+
+    odds_scores = odds_sub.add_parser(
+        "scores", help="provisional results from /scores, ahead of football-data (2 credits/call)"
+    )
+    odds_scores.add_argument("--days-from", dest="days_from", type=int, default=3)
+    odds_scores.add_argument("--predictions-dir", dest="predictions_dir", default=None)
+    odds_scores.set_defaults(func=cmd_odds_scores)
 
     predict = sub.add_parser(
         "predict", help="next-round J1 predictions (DESIGN_PHASE2.md 9, 7.5)"
