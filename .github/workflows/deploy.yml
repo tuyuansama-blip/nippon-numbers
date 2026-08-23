@@ -1,0 +1,49 @@
+name: deploy
+
+# Manual redeploy of whatever `site/` is currently committed. The three
+# publishing workflows deploy their own output inline (docs/DESIGN_ACTIONS.md
+# 6), so this exists only for the cases where that is not what happened: a
+# Cloudflare-side failure to re-run, a rollback to an earlier commit, or a
+# first deploy while the schedule is still being wired up.
+#
+# There is deliberately no `on: push` trigger. A push made with GITHUB_TOKEN
+# does not start another workflow (GitHub's own loop protection), so a
+# push-triggered deploy would fire for a human's commits and silently not
+# fire for the bot's -- the exact opposite of what is wanted.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Commit, branch or tag to deploy (default: this branch)'
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Confirm there is something to deploy
+        # `site/` is committed, not built here: Cloudflare Pages is
+        # configured as a static upload with no build command, so the build
+        # environment stays singular (DESIGN_SITE.md 2.3).
+        run: test -f site/index.html
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy site --project-name=nippon-numbers --branch=main

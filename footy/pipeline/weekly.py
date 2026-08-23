@@ -21,6 +21,15 @@ kickoff) and 3.2 replaces it with one stamp per round taken alongside
 `publish`. `step_stamp` here follows a round straight out of `step_publish`
 rather than being driven off a day-of-month check.
 
+**`stamp` now runs *before* `publish`, not after** (docs/DESIGN_ACTIONS.md
+5). DESIGN_SITE.md 3.2-L2 requires the `.ots` to land "同じ commit に"
+含める -- in the same commit as the prediction it attests. Stamping after
+the commit cannot satisfy that: the artefact would always be one commit
+late, and a reader checking whether the attestation predates kickoff would
+be looking at a different commit than the one holding the prediction. So
+`step_stamp` fires on `predict`'s output first, and `step_publish` takes the
+stamp's artefacts as extra paths to stage.
+
 **`scores` is the one step here that touches the network.** Every other
 step below is cache-only, as the paragraph after this table says. `scores`
 (Fri/Sat/Sun nights, when this round's matches are actually being played) is
@@ -40,7 +49,7 @@ the one source of truth.
 | 月 09:20 | calibrate | `step_calibrate` |
 | 月 09:30 | report --rolling | `step_report` |
 | 木 12:00 | predict | `step_predict` |
-| 木 12:05 | publish (+ per-round stamp) | `step_publish`, `step_stamp` |
+| 木 12:05 | stamp, then publish | `step_stamp`, `step_publish` |
 | 金-日 夜 | scores (暫定結果) | `step_scores` |
 | 月次 | audit | `step_audit` |
 
@@ -61,7 +70,7 @@ from footy.config import DATA_DIR, JPN_DIV, PREDICTIONS_DIR, REPORTS_DIR
 
 WEEKDAY_STEPS = {
     0: ("fetch", "reconcile", "calibrate", "report"),   # Monday
-    3: ("predict", "publish", "stamp"),                 # Thursday
+    3: ("predict", "stamp", "publish"),                 # Thursday
     4: ("scores",),                                     # Friday night
     5: ("scores",),                                     # Saturday night
     6: ("scores",),                                     # Sunday night
@@ -207,9 +216,18 @@ def step_report(*, predictions_dir=None, reports_dir=None) -> dict:
 def step_predict(*, matches_history=None, frozen=None, snapshot_dir=None,
                   matches_path=None, predictions_dir=None, asof_utc=None) -> dict:
     """The publish gate (DESIGN_PHASE2.md 9) is enforced here, not just in
-    `publish`: a blocked round is never written to `predictions/`."""
+    `publish`: a blocked round is never written to `predictions/`.
+
+    So is immutability (DESIGN_SITE.md 3.3). A round already on disk is
+    either byte-compatible with what this run just computed -- in which case
+    the step is a no-op and says so -- or it is not, in which case the run
+    fails rather than overwriting a published prediction. Under the Thursday
+    Actions schedule (docs/DESIGN_ACTIONS.md 6) a retry or a manual
+    re-dispatch is an ordinary event, and neither must be able to rewrite
+    history.
+    """
     from footy.eval.tune import load_frozen_params
-    from footy.pipeline.predict import generate_prediction, write_prediction
+    from footy.pipeline.predict import existing_conflict, generate_prediction, write_prediction
 
     matches = matches_history if matches_history is not None else _load_j1_matches(matches_path)
     frozen = frozen if frozen is not None else load_frozen_params()
@@ -229,33 +247,70 @@ def step_predict(*, matches_history=None, frozen=None, snapshot_dir=None,
             "reason": "publish gate blocked -- no prediction written",
         }
 
+    conflict, existing_path = existing_conflict(payload, predictions_dir=predictions_dir)
+    if conflict == "identical":
+        return {
+            "ok": True, "written": False, "payload": payload,
+            "json_path": str(existing_path),
+            "md_path": str(existing_path.with_suffix(".md")),
+            "note": f"{existing_path.name} already published and unchanged -- not rewritten",
+        }
+    if conflict is not None:
+        return {"ok": False, "payload": payload, "reason": conflict}
+
     json_path, md_path = write_prediction(payload, predictions_dir=predictions_dir)
-    return {"ok": True, "json_path": str(json_path), "md_path": str(md_path), "payload": payload}
+    return {
+        "ok": True, "written": True, "json_path": str(json_path),
+        "md_path": str(md_path), "payload": payload,
+    }
 
 
-def step_publish(*, predict_result: dict, dry_run: bool = True, repo_root=None) -> dict:
+def step_publish(*, predict_result: dict, stamp_result: dict | None = None,
+                  dry_run: bool = True, repo_root=None) -> dict:
+    """Commits the prediction **and this round's stamp artefacts together**
+    -- see the module docstring on why the stamp cannot trail the commit."""
     from footy.pipeline.publish import publish, round_tag
 
     if not predict_result.get("ok") or "json_path" not in predict_result:
         return {"ok": True, "committed": False, "note": "nothing to publish"}
 
     paths = [predict_result["json_path"], predict_result["md_path"]]
+    paths += stamp_paths(stamp_result)
     tag = round_tag(predict_result["payload"])
     return publish(paths, repo_root=repo_root, tag=tag, dry_run=dry_run)
 
 
-# --- per-round (fired from Thursday, right after publish) --------------------
-def step_stamp(*, predict_result: dict) -> dict:
-    """Per-round L2 stamp (DESIGN_SITE.md 3.2), fired for the round that was
-    just published rather than on a monthly clock -- see this module's
+# --- per-round (fired from Thursday, just before publish) --------------------
+def stamp_paths(stamp_result: dict | None) -> list[str]:
+    """The files `step_stamp` produced that belong in `publish`'s commit: the
+    `<round>.ots.json` record always, and the real `.ots` binary when one was
+    actually obtained."""
+    if not stamp_result or not stamp_result.get("path"):
+        return []
+    paths = [stamp_result["path"]]
+    ots_name = stamp_result.get("ots_path")
+    if stamp_result.get("stamped") and ots_name:
+        paths.append(str(Path(stamp_result["path"]).parent / ots_name))
+    return paths
+
+
+def step_stamp(*, predict_result: dict, use_ots: bool = False) -> dict:
+    """Per-round L2 stamp (DESIGN_SITE.md 3.2), fired for the round that is
+    about to be published rather than on a monthly clock -- see this module's
     docstring for why 9's original monthly `stamp` was replaced. A failure
-    here is a warning, never a block (9: "失敗は警告のみ")."""
-    from footy.pipeline.stamp import stamp_round
+    here is a warning, never a block (9: "失敗は警告のみ").
+
+    `use_ots=True` calls the real `opentimestamps-client` (what the Actions
+    workflow passes); the default keeps the network-free stub so no test and
+    no local `footy weekly` run reaches a calendar server (DESIGN.md 4).
+    """
+    from footy.pipeline.stamp import ots_stamp_round, stamp_round
 
     if not predict_result.get("ok") or "json_path" not in predict_result:
         return {"ok": True, "stamped": False, "note": "nothing to stamp"}
     try:
-        payload = stamp_round(predict_result["json_path"])
+        stamp = ots_stamp_round if use_ots else stamp_round
+        payload = stamp(predict_result["json_path"])
         return {"ok": True, **payload}
     except Exception as exc:                     # 9: "失敗は警告のみ"
         return {"ok": False, "reason": str(exc)}
@@ -339,11 +394,17 @@ def run_weekly(
     dry_run_publish: bool = True, repo_root=None, snapshot_dir=None,
     matches_path=None, predictions_dir=None, raw_dir=None,
     frozen=None, matches_history=None, asof_utc=None, score_events=None,
+    use_ots: bool = False,
 ) -> dict:
     """Run whichever steps are due. `steps`, if given, overrides the
     weekday/day-of-month gating entirely (used by `footy weekly --steps ...`
     for a manual/backfill run of a specific stage). Stops after `fetch` iff
     it comes back red (9's stated behaviour for that step).
+
+    `use_ots=True` makes the `stamp` step call the real
+    `opentimestamps-client` instead of writing the network-free stub. Only
+    the GitHub Actions `predict` workflow passes it (docs/DESIGN_ACTIONS.md
+    5); every other caller, including the whole test suite, must not.
 
     `frozen`/`matches_history`, when given, are threaded straight through to
     every step instead of each step re-reading `data/frozen_params.json` /
@@ -362,6 +423,7 @@ def run_weekly(
 
     report: dict[str, dict] = {}
     predict_result = None
+    stamp_result: dict | None = None
     for step in steps:
         if step == "fetch":
             report[step] = step_fetch(raw_dir=raw_dir, out_path=matches_path)
@@ -386,10 +448,13 @@ def run_weekly(
         elif step == "publish":
             report[step] = step_publish(
                 predict_result=predict_result or {"ok": False},
-                dry_run=dry_run_publish, repo_root=repo_root,
+                stamp_result=stamp_result, dry_run=dry_run_publish, repo_root=repo_root,
             )
         elif step == "stamp":
-            report[step] = step_stamp(predict_result=predict_result or {"ok": False})
+            stamp_result = step_stamp(
+                predict_result=predict_result or {"ok": False}, use_ots=use_ots
+            )
+            report[step] = stamp_result
         elif step == "scores":
             report[step] = step_scores(score_events=score_events, predictions_dir=predictions_dir)
         elif step == "audit":

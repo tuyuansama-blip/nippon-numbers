@@ -438,6 +438,71 @@ def render_markdown(payload: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+# --- immutability of an already-published round (DESIGN_SITE.md 3.3) ---------
+# DESIGN_SITE.md 3.3 forbids these fields ever changing after a round's first
+# commit; only `result` may be filled in later. Locally that rule is enforced
+# by a human noticing; under an unattended GitHub Actions schedule
+# (docs/DESIGN_ACTIONS.md 6) nothing would notice, and a retried or manually
+# re-dispatched Thursday run would quietly rewrite a published prediction
+# with a fresh `generated_at` and marginally different probabilities. So the
+# check moved into the pipeline itself, ahead of the write.
+#
+# `asof` and `generated_at` are on 3.3's forbidden-to-change list but are
+# deliberately *not* part of the comparison below. They move by construction
+# on every re-run (both are "now"), so comparing them would make a harmless
+# retry -- the round already computed, committed, and only the `git push`
+# having failed -- indistinguishable from a genuine rewrite. What protects
+# them is the guard's action rather than its test: an already-published file
+# is never rewritten, so the `asof` it was published with is exactly the one
+# that stays. A same-day re-run reaches the identical model fit anyway
+# (`compute_prediction_state` normalises `asof` to a date), so the
+# probabilities below are the honest discriminator between "retry" and
+# "someone changed the model".
+IMMUTABLE_MATCH_FIELDS = ("event_id", "commence_time", "p_raw", "p_calibrated")
+IMMUTABLE_TOP_FIELDS = ("round_id", "season", "model_version", "params_hash")
+
+
+def immutable_view(payload: dict) -> dict:
+    """Exactly the part of a prediction that may never change again."""
+    return {
+        "top": {key: payload.get(key) for key in IMMUTABLE_TOP_FIELDS},
+        "matches": [
+            {key: match.get(key) for key in IMMUTABLE_MATCH_FIELDS}
+            for match in payload.get("matches", [])
+        ],
+    }
+
+
+def existing_conflict(payload: dict, *, predictions_dir=None):
+    """`(status, path)` for a round that has already been written.
+
+    `status` is `None` (nothing on disk), `"identical"` (a re-run that would
+    be a no-op) or a human-readable description of what would change.
+    """
+    root = Path(predictions_dir) if predictions_dir else PREDICTIONS_DIR
+    path = root / f"j1_{payload['season']}_{payload['round_id']}.json"
+    if not path.exists():
+        return None, path
+    try:
+        existing = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        return f"{path.name} exists but is unreadable ({exc})", path
+    if immutable_view(existing) == immutable_view(payload):
+        return "identical", path
+
+    old, new = immutable_view(existing), immutable_view(payload)
+    changed = [key for key in IMMUTABLE_TOP_FIELDS if old["top"][key] != new["top"][key]]
+    if len(old["matches"]) != len(new["matches"]):
+        changed.append(f"fixture count {len(old['matches'])} -> {len(new['matches'])}")
+    elif any(a != b for a, b in zip(old["matches"], new["matches"])):
+        changed.append("fixture probabilities")
+    return (
+        f"{path.name} is already published and this run would change "
+        + ", ".join(changed or ["an immutable field"])
+        + " -- DESIGN_SITE.md 3.3 allows only `result` to be filled in afterwards"
+    ), path
+
+
 def write_prediction(payload: dict, *, predictions_dir=None) -> tuple[Path, Path]:
     root = Path(predictions_dir) if predictions_dir else PREDICTIONS_DIR
     root.mkdir(parents=True, exist_ok=True)

@@ -1,0 +1,37 @@
+# Pinned closure of requirements.txt, frozen from the environment that ran the
+# J1 confirmation run and every test in this repository (Python 3.14.5, macOS
+# arm64). GitHub Actions installs from *this* file, not from requirements.txt.
+#
+# Why pin at all: docs/DESIGN_SITE.md 3.2-L1 makes GitHub Actions the third-
+# party witness that a prediction existed before kickoff, and 3.4 step 5 asks
+# a reader to reproduce the backtest themselves. Both claims weaken if the
+# numbers depend on whichever numpy/scipy happened to be newest on the day.
+# `requirements.txt` stays the loose, human-facing dependency list; this file
+# is the reproducible one.
+#
+# Regenerate with:  ./.venv/bin/pip freeze | grep -v '^pyflakes'
+certifi==2026.7.22
+charset-normalizer==3.5.1
+contourpy==1.3.3
+cycler==0.12.1
+fonttools==4.63.0
+idna==3.19
+iniconfig==2.3.0
+Jinja2==3.1.6
+kiwisolver==1.5.0
+MarkupSafe==3.0.3
+matplotlib==3.11.1
+numpy==2.5.2
+packaging==26.3
+pandas==3.0.5
+pillow==12.3.0
+pluggy==1.6.0
+pyarrow==25.0.1
+Pygments==2.21.0
+pyparsing==3.3.2
+pytest==9.1.1
+python-dateutil==2.9.0.post0
+requests==2.34.2
+scipy==1.18.0
+six==1.17.0
+urllib3==2.7.0

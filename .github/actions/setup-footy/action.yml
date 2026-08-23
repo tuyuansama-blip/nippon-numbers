@@ -1,0 +1,28 @@
+name: Set up the footy environment
+description: >
+  Python plus the pinned dependency closure, in a `.venv/` laid out exactly
+  as a local checkout has it -- so every workflow step can call `./bin/footy`
+  and `./bin/pytest`, the same two entry points a human uses, instead of a
+  parallel Actions-only invocation that could drift from them.
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        # Pinned to the interpreter the J1 confirmation run and the whole
+        # test suite were executed on (requirements.lock's header). Matching
+        # it here is what lets a reader reproduce a published number
+        # (DESIGN_SITE.md 3.4 step 5).
+        python-version: '3.14'
+        cache: pip
+        cache-dependency-path: requirements.lock
+
+    - name: Install the pinned dependency closure
+      shell: bash
+      run: |
+        set -euo pipefail
+        python -m venv .venv
+        ./.venv/bin/pip install --disable-pip-version-check --quiet --upgrade pip
+        ./.venv/bin/pip install --disable-pip-version-check --quiet -r requirements.lock
+        ./.venv/bin/python -c "import pandas, numpy, scipy, jinja2; print('deps ok')"

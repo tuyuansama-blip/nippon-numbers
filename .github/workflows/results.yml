@@ -1,0 +1,83 @@
+name: results
+
+# The Friday/Saturday/Sunday-night `scores` step of DESIGN_PHASE2.md 9:
+# provisional results from The Odds API's `/scores`, ahead of
+# football-data.co.uk's confirmed ones that Monday's `reconcile` overwrites
+# them with. This is what stops the public page saying "not yet played" for
+# two days after a match that everyone watched.
+
+on:
+  schedule:
+    # 23:00 and 01:00 JST on the nights J1 plays. UTC 14:00/16:00 on Fri, Sat
+    # and Sun maps to JST Fri 23:00 / Sat 01:00, Sat 23:00 / Sun 01:00,
+    # Sun 23:00 / Mon 01:00 -- the two hours after a 19:00-19:30 JST kickoff
+    # has finished, and a second pass for anything that ran late.
+    - cron: '0 14,16 * * 5,6,0'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Fetch and apply locally, but do not commit, push or deploy'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: repo-write
+  cancel-in-progress: false
+
+jobs:
+  scores:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-footy
+
+      - name: Identify as the bot, not as a person
+        run: |
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+      - name: Provisional results
+        # `step_scores` treats a missing key or a failed call as a warning,
+        # never a stop (DESIGN_PHASE2.md 9): a quiet night here means the
+        # site shows "not yet played" a little longer, never a wrong result,
+        # because Monday's `reconcile` remains the single source of truth.
+        run: ./bin/footy weekly --steps scores
+
+      - name: Rebuild the site
+        run: ./bin/footy site build
+
+      - name: Commit
+        if: ${{ !inputs.dry_run }}
+        id: commit
+        # Only `predictions/` and `site/` -- and within `predictions/`, this
+        # step can only ever have filled in a `result`, which is the one
+        # field DESIGN_SITE.md 3.3 permits to change after publication. CI's
+        # immutability guard re-checks that on the resulting push.
+        run: |
+          set -euo pipefail
+          git add -- predictions site
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "no new results tonight"
+          else
+            git commit -m 'results: provisional scores from the odds API'
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push
+        if: ${{ !inputs.dry_run && steps.commit.outputs.changed == 'true' }}
+        run: git push origin HEAD:${{ github.ref_name }}
+
+      - name: Deploy to Cloudflare Pages
+        if: ${{ !inputs.dry_run && steps.commit.outputs.changed == 'true' }}
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy site --project-name=nippon-numbers --branch=main

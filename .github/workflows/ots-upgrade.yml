@@ -1,0 +1,81 @@
+name: ots upgrade
+
+# The second half of DESIGN_SITE.md 3.2's L2: `ots stamp` at publish time
+# submits a commitment to the public calendars, but the attestation is only
+# anchored once a Bitcoin block confirms it, "数時間後の `ots upgrade` で
+# Bitcoin ブロックへの attestation を追記して再コミット". Running daily
+# picks that up for every round without anyone remembering to.
+
+on:
+  schedule:
+    # 15:00 JST == 06:00 UTC. Well clear of Thursday's publish, and clear of
+    # the repo-write traffic on Monday morning and at weekends.
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: repo-write
+  cancel-in-progress: false
+
+jobs:
+  upgrade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the OpenTimestamps client
+        id: ots
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/otsenv"
+          "$RUNNER_TEMP/otsenv/bin/pip" install --quiet opentimestamps-client
+          echo "FOOTY_OTS_BIN=$RUNNER_TEMP/otsenv/bin/ots" >> "$GITHUB_ENV"
+
+      - name: Note a skipped run
+        if: steps.ots.outcome != 'success'
+        run: echo "::warning::opentimestamps-client unavailable -- L2 upgrade skipped (warning-only, DESIGN_PHASE2.md 9)"
+
+      - uses: ./.github/actions/setup-footy
+        if: steps.ots.outcome == 'success'
+
+      - name: Identify as the bot, not as a person
+        if: steps.ots.outcome == 'success'
+        run: |
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+      - name: ots upgrade
+        if: steps.ots.outcome == 'success'
+        run: ./bin/footy stamp-upgrade
+
+      - name: Commit the .ots files only
+        if: steps.ots.outcome == 'success'
+        id: commit
+        # DESIGN_SITE.md 3.2's operating rule: "`.ots` の upgrade コミットは
+        # 予測 JSON のバイト列を変更してはならない". Enforced twice -- the
+        # pathspec below stages nothing else, and the check after it fails
+        # the run if anything else moved anyway.
+        run: |
+          set -euo pipefail
+          if ! git diff --quiet -- 'predictions/*.json'; then
+            echo "::error::an upgrade run modified a prediction JSON -- refusing to commit"
+            git --no-pager diff --stat -- 'predictions/*.json'
+            exit 1
+          fi
+          git add -- 'predictions/*.ots'
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "no attestation has been confirmed yet"
+          else
+            git commit -m 'ots: upgrade attestations to their Bitcoin anchor'
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push
+        if: steps.commit.outputs.changed == 'true'
+        run: git push origin HEAD:${{ github.ref_name }}

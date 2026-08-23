@@ -1,6 +1,15 @@
 #!/bin/sh
 # J1 オッズ前向き収集: キックオフ起点スケジュール(DESIGN_PHASE2.md 8.4)。
 #
+# ** 本番の収集は .github/workflows/odds-collect.yml に移った **
+# (docs/DESIGN_ACTIONS.md)。このスクリプトは (a) 移行前のローカル cron 用
+# として、(b) Actions が止まったときの手動フォールバックとして残してある。
+# Actions と同時に走らせてはならない: このスクリプトは R2 を知らないので
+# 状態ファイルが分岐し、同じ収集点に二重に API クレジットを払う
+# (docs/SETUP_ACTIONS.md STEP 6)。手で回す場合は前後を
+#   ./bin/footy odds sync pull --state-only  /  ./bin/footy odds sync push
+# で挟むこと。
+#
 # 旧版(1日2回・固定時刻)は Fri 19:00 JST 開始の試合に対して T-26.6h/T-50h
 # にしかならず、"クローズ"と呼べる粒度ではなかった(DESIGN_PHASE2.md 0.18)。
 # 本版は footy/pipeline/odds_schedule.py に実装されたクラスタ単位

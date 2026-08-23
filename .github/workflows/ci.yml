@@ -1,0 +1,60 @@
+name: CI
+
+# docs/DESIGN_SITE.md 2.4's `verify.yml` slot, minus the `verify.py`
+# re-implementation that section also asks for (still to be written --
+# docs/DESIGN_ACTIONS.md 9). What runs here is the suite plus the two guards
+# that protect the things a failing test would not catch: the data boundary
+# of 2.6 and the prediction immutability of 3.3.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-footy
+      - name: pytest
+        # tests/conftest.py replaces `socket.connect` for the whole session,
+        # so a test that reaches for the network fails loudly here rather
+        # than depending on a third-party site being up (DESIGN.md 4).
+        run: ./bin/pytest -q
+
+  guards:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The immutability guard diffs against the merge base, so it needs
+          # more than the single commit `checkout` fetches by default.
+          fetch-depth: 0
+
+      - name: Data boundary (DESIGN_SITE.md 2.6)
+        run: ./.github/scripts/check_data_boundary.sh
+
+      - name: Prediction immutability (DESIGN_SITE.md 3.3)
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          # `github.event.before` is all-zeroes for a branch's first push and
+          # for a manual dispatch; there is no earlier revision to compare a
+          # prediction against in either case.
+          if [ -z "${BASE:-}" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+            echo "no base revision to compare against -- skipping"
+            exit 0
+          fi
+          python3 .github/scripts/check_prediction_immutability.py "$BASE" "${{ github.sha }}"

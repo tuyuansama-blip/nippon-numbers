@@ -22,6 +22,10 @@ reports/
 # to this spike (J1, not E0) and not ours to redistribute.
 data/odds_snapshots/
 
+# `wrangler`'s local state directory (Cloudflare Pages deploy cache). Written
+# by `wrangler pages deploy` and of no use to anyone else.
+.wrangler/
+
 .venv/
 __pycache__/
 *.py[cod]

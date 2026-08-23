@@ -345,9 +345,76 @@ def cmd_odds_schedule(args) -> int:
         print("error: ODDS_API_KEY not set", file=sys.stderr)
         return 2
     written = run_schedule(
-        api_key, snapshot_dir=args.snapshot_dir, dry_run=args.dry_run
+        api_key, snapshot_dir=args.snapshot_dir, dry_run=args.dry_run,
+        wait=not args.no_wait,
     )
     print(f"snapshots written: {written}")
+    return 0
+
+
+def cmd_odds_sync(args) -> int:
+    """`footy odds sync {pull,push}` (docs/DESIGN_ACTIONS.md 2): move raw
+    snapshots and the schedule state between `data/odds_snapshots/` and the
+    private R2 bucket. Never touches the public repository -- the raw feed
+    must not enter it (DESIGN_SITE.md 2.6)."""
+    from footy.config import DATA_DIR
+    from footy.odds import sync as sync_module
+    from footy.odds.r2 import missing_env_names
+
+    client = sync_module.client_from_env()
+    if client is None:
+        names = ", ".join(missing_env_names())
+        print(f"error: R2 is not configured -- missing {names}", file=sys.stderr)
+        print("see docs/SETUP_ACTIONS.md for how to create the token", file=sys.stderr)
+        return 2
+
+    snapshot_dir = args.snapshot_dir or (DATA_DIR / "odds_snapshots")
+    include = "state" if args.state_only else ("snapshots" if args.snapshots_only else "all")
+    action = sync_module.pull if args.direction == "pull" else sync_module.push
+    result = action(client, snapshot_dir=snapshot_dir, include=include, dry_run=args.dry_run)
+    moved = result.get("pulled" if args.direction == "pull" else "pushed", [])
+    print(f"{args.direction}: {len(moved)} snapshot(s), state={result.get('state')}")
+    return 0
+
+
+def cmd_stamp(args) -> int:
+    """`footy stamp <prediction.json>` (DESIGN_SITE.md 3.2-L2). `--ots` calls
+    the real `opentimestamps-client`; without it the network-free stub record
+    is written instead."""
+    from footy.pipeline.stamp import ots_stamp_round, stamp_round
+
+    stamp = ots_stamp_round if args.ots else stamp_round
+    payload = stamp(args.path)
+    print(f"sha256: {payload['sha256']}")
+    print(f"stamped: {payload['stamped']}")
+    if payload.get("ots_path"):
+        print(f"ots: {payload['ots_path']}")
+    print(f"written: {payload['path']}")
+    if not payload["stamped"] and args.ots:
+        print(f"warning: {payload['note']}", file=sys.stderr)
+    return 0
+
+
+def cmd_stamp_upgrade(args) -> int:
+    """`footy stamp-upgrade` -- `ots upgrade` every `.ots` under
+    `predictions/`, so a calendar commitment picks up its Bitcoin
+    attestation. Touches only `.ots` bytes, never a prediction JSON
+    (DESIGN_SITE.md 3.2's operating rule)."""
+    from footy.config import PREDICTIONS_DIR
+    from footy.pipeline.stamp import ots_upgrade, stamp_records
+
+    root = args.predictions_dir or PREDICTIONS_DIR
+    records = stamp_records(root)
+    if not records:
+        print("no stamped predictions to upgrade")
+        return 0
+    changed = 0
+    for _, record, ots_path in records:
+        result = ots_upgrade(ots_path)
+        changed += bool(result["changed"])
+        state = "upgraded" if result["changed"] else ("ok" if result["ok"] else "pending")
+        print(f"{record['file']}: {state}" + (f" ({result['note']})" if result["note"] else ""))
+    print(f"{changed} of {len(records)} .ots file(s) changed")
     return 0
 
 
@@ -451,7 +518,9 @@ def cmd_weekly(args) -> int:
     (JST), or exactly `--steps` when given."""
     from footy.pipeline.weekly import run_weekly
 
-    result = run_weekly(steps=args.steps, dry_run_publish=not args.publish)
+    result = run_weekly(
+        steps=args.steps, dry_run_publish=not args.publish, use_ots=args.ots
+    )
     for step in result.get("steps_run", []):
         payload = result.get(step, {})
         ok = payload.get("ok") if isinstance(payload, dict) else None
@@ -538,7 +607,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     odds_schedule.add_argument("--snapshot-dir", dest="snapshot_dir", default=None)
     odds_schedule.add_argument("--dry-run", action="store_true")
+    odds_schedule.add_argument(
+        "--no-wait", dest="no_wait", action="store_true",
+        help="never sleep for a near-kickoff point (old crontab behaviour; "
+             "docs/DESIGN_ACTIONS.md 4)",
+    )
     odds_schedule.set_defaults(func=cmd_odds_schedule)
+
+    odds_sync = odds_sub.add_parser(
+        "sync", help="move snapshots/state between data/odds_snapshots/ and R2"
+    )
+    odds_sync.add_argument("direction", choices=("pull", "push"))
+    odds_sync.add_argument("--snapshot-dir", dest="snapshot_dir", default=None)
+    odds_sync.add_argument("--state-only", dest="state_only", action="store_true")
+    odds_sync.add_argument("--snapshots-only", dest="snapshots_only", action="store_true")
+    odds_sync.add_argument("--dry-run", action="store_true")
+    odds_sync.set_defaults(func=cmd_odds_sync)
 
     odds_scores = odds_sub.add_parser(
         "scores", help="provisional results from /scores, ahead of football-data (2 credits/call)"
@@ -576,7 +660,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--publish", action="store_true",
         help="actually git-commit/tag the publish step (default: dry-run)",
     )
+    weekly.add_argument(
+        "--ots", action="store_true",
+        help="stamp with the real opentimestamps-client (Actions only; "
+             "default writes the network-free stub)",
+    )
     weekly.set_defaults(func=cmd_weekly)
+
+    stamp = sub.add_parser("stamp", help="per-round OpenTimestamps stamp (DESIGN_SITE.md 3.2)")
+    stamp.add_argument("path", help="path to a prediction JSON")
+    stamp.add_argument("--ots", action="store_true", help="call the real `ots stamp`")
+    stamp.set_defaults(func=cmd_stamp)
+
+    stamp_upgrade = sub.add_parser(
+        "stamp-upgrade", help="`ots upgrade` every .ots under predictions/"
+    )
+    stamp_upgrade.add_argument("--predictions-dir", dest="predictions_dir", default=None)
+    stamp_upgrade.set_defaults(func=cmd_stamp_upgrade)
     return parser
 
 

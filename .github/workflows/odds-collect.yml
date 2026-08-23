@@ -1,0 +1,68 @@
+name: odds collect
+
+# The kickoff-anchored collection pass of DESIGN_PHASE2.md 8.4, moved off the
+# local crontab. See docs/DESIGN_ACTIONS.md 4 for why the cadence is 10
+# minutes and why the collector is allowed to sleep for a near-kickoff point
+# rather than trust the scheduler to be punctual.
+#
+# This is the only workflow that writes nothing to the repository: the raw
+# snapshots may not enter it (DESIGN_SITE.md 2.6), so both they and the
+# schedule state round-trip through the private R2 bucket instead.
+
+on:
+  schedule:
+    # Every 10 minutes. `schedule` is best-effort -- GitHub starts these late
+    # and occasionally drops one -- so the interval is a floor on coverage,
+    # not a promise of grain. `footy odds schedule` reconciles whatever
+    # actually happened against the five target offsets.
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Plan the pass without spending an API credit'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  # `.schedule_state.json` is a read-modify-write on a single object. Two
+  # runners holding it at once would each collect the other's points again,
+  # at one paid credit apiece. `cancel-in-progress: false` lets a run that is
+  # mid-sleep for a t25min point finish rather than be killed by the next
+  # tick; GitHub keeps at most one further run queued behind it, which is the
+  # behaviour we want.
+  group: odds-collect
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    # Generous enough for MAX_WAIT (15 min) plus the sync either side.
+    timeout-minutes: 30
+    env:
+      ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+      R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-footy
+
+      - name: Pull the schedule state from R2
+        # State only: this job never needs the snapshot archive, and pulling
+        # it 144 times a day would cost far more than it buys.
+        run: ./bin/footy odds sync pull --state-only
+
+      - name: Collect the points this run owns
+        run: ./bin/footy odds schedule ${{ inputs.dry_run && '--dry-run' || '' }}
+
+      - name: Push new snapshots and the state to R2
+        # `always()`: a run that collected two points and then failed on the
+        # third must still record the two, or the next run pays for them
+        # again. `sync push` writes the state last, so a half-finished push
+        # can only under-claim, never over-claim (footy/odds/sync.py).
+        if: always() && !inputs.dry_run
+        run: ./bin/footy odds sync push

@@ -1,0 +1,120 @@
+name: predict
+
+# DESIGN_SITE.md 3.2's L1 layer, and the reason the whole migration exists:
+# the prediction for the coming round is generated, stamped and committed
+# *inside* a scheduled GitHub Actions run, from a workflow file anyone can
+# read, by `github-actions[bot]`. The run's `created_at` is GitHub's server
+# clock, which -- unlike a git commit date (3.1) -- the author cannot set.
+
+on:
+  schedule:
+    # Thursday 12:00 JST == 03:00 UTC (DESIGN_PHASE2.md 9's `predict` row).
+    - cron: '0 3 * * 4'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Generate and print, but do not commit, push or deploy'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  # Shared by every workflow that pushes to main, so two of them can never
+  # race on the same branch (docs/DESIGN_ACTIONS.md 6).
+  group: repo-write
+  cancel-in-progress: false
+
+jobs:
+  predict:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # `footy.pipeline.predict.preregistered_hash` reads the
+          # `phase2-preregistered-*` tag to enforce the params_hash publish
+          # gate (DESIGN_PHASE2.md 5.3-5). A shallow checkout carries no
+          # tags, and the gate would silently report itself inactive -- a
+          # quiet downgrade of a preregistration guarantee.
+          fetch-depth: 0
+
+      - name: Install the OpenTimestamps client (L2)
+        id: ots
+        continue-on-error: true
+        # Its own virtualenv, built from the *runner's system* python (this
+        # step deliberately runs before `setup-footy`, so `python3` is not
+        # yet 3.14): `python-bitcoinlib` tracks a slower Python-version
+        # cadence than this project's pinned interpreter. L2 is warning-only
+        # (DESIGN_PHASE2.md 9), so this must never be able to break -- or
+        # even perturb -- the environment the prediction is computed in.
+        # `continue-on-error` plus `footy`'s own fallback means a failure
+        # here degrades the run to the network-free stub record, nothing
+        # more.
+        run: |
+          set -euo pipefail
+          python3 -c 'import sys; print("ots interpreter:", sys.version)'
+          python3 -m venv "$RUNNER_TEMP/otsenv"
+          "$RUNNER_TEMP/otsenv/bin/pip" install --quiet opentimestamps-client
+          echo "FOOTY_OTS_BIN=$RUNNER_TEMP/otsenv/bin/ots" >> "$GITHUB_ENV"
+
+      - uses: ./.github/actions/setup-footy
+
+      - name: Pull the odds snapshots from R2
+        # `footy predict` reads the next round's fixture list out of the
+        # cached snapshots (footy/pipeline/predict.py) -- they are an input
+        # here, not an output, and they cannot come from the repository.
+        run: ./bin/footy odds sync pull
+
+      - name: Identify as the bot, not as a person
+        run: |
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+      - name: fetch -> predict -> stamp -> publish
+        # One command, because `run_weekly` owns the ordering: the stamp is
+        # taken before the commit so the `.ots` lands in the *same* commit as
+        # the prediction (DESIGN_SITE.md 3.2-L2), and the publish gate
+        # (DESIGN_PHASE2.md 9) fails the step rather than shipping a blocked
+        # or stale round -- which is exactly 2.4's "満たさないときはサイト
+        # を更新せずワークフローを失敗させる".
+        run: |
+          ./bin/footy weekly \
+            --steps fetch predict stamp publish \
+            ${{ inputs.dry_run && '' || '--publish --ots' }}
+
+      - name: Rebuild the site
+        run: ./bin/footy site build
+
+      - name: Commit the rebuilt site
+        if: ${{ !inputs.dry_run }}
+        # A second commit, deliberately: the prediction commit above stays a
+        # clean, auditable record of the round alone, with no generated HTML
+        # in its diff.
+        run: |
+          set -euo pipefail
+          git add -- site
+          git diff --cached --quiet || git commit -m 'site: rebuild for the new round'
+
+      - name: Push
+        if: ${{ !inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          git push origin HEAD:${{ github.ref_name }}
+          # `publish` creates a lightweight round tag, which --follow-tags
+          # would skip.
+          git push origin --tags
+
+      - name: Deploy to Cloudflare Pages
+        if: ${{ !inputs.dry_run }}
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy site --project-name=nippon-numbers --branch=main

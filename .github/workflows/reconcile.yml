@@ -1,0 +1,78 @@
+name: reconcile
+
+# DESIGN_PHASE2.md 9's Monday column: fetch -> reconcile -> calibrate ->
+# report. This is where a provisional Saturday-night score is promoted to
+# football-data.co.uk's confirmed one, and where a disagreement between the
+# two is recorded as `result.discrepancy` rather than quietly resolved
+# (footy/pipeline/reconcile.py).
+
+on:
+  schedule:
+    # Monday 09:00 JST == 00:00 UTC.
+    - cron: '0 0 * * 1'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Reconcile locally, but do not commit, push or deploy'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: repo-write
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # `step_audit`'s params_hash check reads the preregistration tag,
+          # same reason as predict.yml.
+          fetch-depth: 0
+      - uses: ./.github/actions/setup-footy
+
+      - name: Identify as the bot, not as a person
+        run: |
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+      - name: fetch -> reconcile -> calibrate -> report
+        # `run_weekly` stops after `fetch` if `footy check --league jpn1`
+        # comes back red, and returns non-zero, which fails this step -- the
+        # site is then left showing last week's numbers rather than being
+        # rebuilt on data the integrity checks rejected.
+        run: ./bin/footy weekly --steps fetch reconcile calibrate report
+
+      - name: Rebuild the site
+        run: ./bin/footy site build
+
+      - name: Commit
+        if: ${{ !inputs.dry_run }}
+        id: commit
+        run: |
+          set -euo pipefail
+          git add -- predictions site
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "nothing to reconcile this week"
+          else
+            git commit -m 'reconcile: confirmed results and refreshed track record'
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push
+        if: ${{ !inputs.dry_run && steps.commit.outputs.changed == 'true' }}
+        run: git push origin HEAD:${{ github.ref_name }}
+
+      - name: Deploy to Cloudflare Pages
+        if: ${{ !inputs.dry_run && steps.commit.outputs.changed == 'true' }}
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy site --project-name=nippon-numbers --branch=main
