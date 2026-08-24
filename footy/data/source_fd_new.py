@@ -41,12 +41,17 @@ def raw_path(raw_dir) -> Path:
     return Path(raw_dir) / JPN_RAW_FILENAME
 
 
-def fetch_jpn_csv(raw_dir, *, fetcher=None) -> Path:
-    """Download `new/JPN.csv` if it is not already cached. One request, ever
-    -- the whole 2012-present history is one file (DESIGN_PHASE2.md 6.1)."""
-    root = Path(raw_dir)
+def fetch_jpn_csv(raw_dir=None, *, fetcher=None, refresh=False) -> Path:
+    """Download `new/JPN.csv` if it is not already cached (the whole
+    2012-present history is one file, DESIGN_PHASE2.md 6.1). `refresh=True`
+    discards the cached copy first -- football-data appends new results to
+    the same file, so a reconcile that wants them must re-download."""
+    from footy.config import RAW_DIR
+    root = Path(raw_dir) if raw_dir is not None else RAW_DIR
     root.mkdir(parents=True, exist_ok=True)
     target = raw_path(root)
+    if refresh and target.exists():
+        target.unlink()
     if target.exists() and target.stat().st_size > 0:
         return target
     from footy.data.download import Fetcher

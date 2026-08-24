@@ -42,7 +42,7 @@ def cmd_fetch(args) -> int:
     if args.league == "jpn1":
         from footy.data.source_fd_new import fetch_jpn_csv
 
-        path = fetch_jpn_csv(args.raw_dir or None)
+        path = fetch_jpn_csv(args.raw_dir or None, refresh=getattr(args, "refresh", False))
         print(f"J1: {path}")
         return 0
 
@@ -542,6 +542,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     fetch = sub.add_parser("fetch", help="download season CSVs")
     fetch.add_argument("--from", dest="from_", type=_season, default=1995)
+    fetch.add_argument("--refresh", action="store_true", help="discard the cached JPN.csv and re-download (jpn1 only)")
     fetch.add_argument("--to", dest="to", type=_season, default=2025)
     fetch.add_argument("--divs", nargs="+", default=list(DEFAULT_DIVS))
     fetch.add_argument("--interval", type=float, default=MIN_INTERVAL_SEC)
