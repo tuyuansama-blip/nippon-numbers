@@ -67,6 +67,13 @@ jobs:
             git --no-pager diff --stat -- 'predictions/*.json'
             exit 1
           fi
+          # `git add` errors on a pathspec that matches nothing, which is the
+          # normal state before the first `--ots` publish has landed.
+          if ! compgen -G 'predictions/*.ots' > /dev/null; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "no .ots files exist yet -- nothing to upgrade or commit"
+            exit 0
+          fi
           git add -- 'predictions/*.ots'
           if git diff --cached --quiet; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
