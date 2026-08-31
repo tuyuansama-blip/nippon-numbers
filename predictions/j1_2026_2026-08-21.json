@@ -73,8 +73,7 @@
         "rps_cal": 0.1339836249021251,
         "ll_raw": 0.6187917307018689,
         "ll_cal": 0.628858689417185,
-        "source": "odds_api_provisional",
-        "fetched_at": "2026-08-23T12:42:00.681685+00:00"
+        "source": "football_data"
       }
     },
     {
@@ -103,8 +102,7 @@
         "rps_cal": 0.08113142851942101,
         "ll_raw": 0.4475746753642277,
         "ll_cal": 0.4559680727049437,
-        "source": "odds_api_provisional",
-        "fetched_at": "2026-08-23T12:42:00.681685+00:00"
+        "source": "football_data"
       }
     },
     {
@@ -133,8 +131,7 @@
         "rps_cal": 0.14226719881114766,
         "ll_raw": 0.6608985268797815,
         "ll_cal": 0.6711398646000032,
-        "source": "odds_api_provisional",
-        "fetched_at": "2026-08-23T12:42:00.681685+00:00"
+        "source": "football_data"
       }
     },
     {
@@ -163,8 +160,7 @@
         "rps_cal": 0.1218553984760002,
         "ll_raw": 1.171369625347562,
         "ll_cal": 1.1665910957896004,
-        "source": "odds_api_provisional",
-        "fetched_at": "2026-08-23T12:42:00.681685+00:00"
+        "source": "football_data"
       }
     },
     {
@@ -193,8 +189,7 @@
         "rps_cal": 0.18554206427477313,
         "ll_raw": 0.7595427100533584,
         "ll_cal": 0.770765027419943,
-        "source": "odds_api_provisional",
-        "fetched_at": "2026-08-23T12:42:00.681685+00:00"
+        "source": "football_data"
       }
     },
     {
@@ -223,8 +218,7 @@
         "rps_cal": 0.26636938848034153,
         "ll_raw": 0.9745992763939922,
         "ll_cal": 0.9870611361522142,
-        "source": "odds_api_provisional",
-        "fetched_at": "2026-08-23T12:42:00.681685+00:00"
+        "source": "football_data"
       }
     },
     {
@@ -253,8 +247,7 @@
         "rps_cal": 0.44833986921817626,
         "ll_raw": 1.5140229639092466,
         "ll_cal": 1.498747061873651,
-        "source": "odds_api_provisional",
-        "fetched_at": "2026-08-23T12:42:00.681685+00:00"
+        "source": "football_data"
       }
     },
     {
@@ -283,8 +276,7 @@
         "rps_cal": 0.1710608512203038,
         "ll_raw": 1.5189841154846535,
         "ll_cal": 1.5104566907732782,
-        "source": "odds_api_provisional",
-        "fetched_at": "2026-08-23T12:42:00.681685+00:00"
+        "source": "football_data"
       }
     },
     {
@@ -313,8 +305,7 @@
         "rps_cal": 0.28236083544690466,
         "ll_raw": 1.0204686239130614,
         "ll_cal": 1.033113655978718,
-        "source": "odds_api_provisional",
-        "fetched_at": "2026-08-23T12:42:00.681685+00:00"
+        "source": "football_data"
       }
     },
     {
@@ -343,8 +334,7 @@
         "rps_cal": 0.1438765659699001,
         "ll_raw": 0.6491092531410304,
         "ll_cal": 0.6594248712118004,
-        "source": "odds_api_provisional",
-        "fetched_at": "2026-08-23T12:42:00.681685+00:00"
+        "source": "football_data"
       }
     }
   ],
