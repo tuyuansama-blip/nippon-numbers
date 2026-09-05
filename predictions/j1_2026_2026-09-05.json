@@ -64,7 +64,18 @@
         "d": 0.28475572909949515,
         "a": 0.32968969360225364
       },
-      "result": null
+      "result": {
+        "fthg": 1.0,
+        "ftag": 1.0,
+        "ftr": "D",
+        "y": 1,
+        "rps_raw": 0.12938165988782926,
+        "rps_cal": 0.1286738130715905,
+        "ll_raw": 1.260692478880002,
+        "ll_cal": 1.2561235571048477,
+        "source": "odds_api_provisional",
+        "fetched_at": "2026-09-05T16:29:39.275148+00:00"
+      }
     },
     {
       "event_id": "0e5955d0728c2164236942c03afa89e3",
@@ -237,5 +248,14 @@
       },
       "result": null
     }
-  ]
+  ],
+  "round_summary": {
+    "n_matches": 10,
+    "n_resolved": 1,
+    "complete": false,
+    "mean_rps_raw": 0.12938165988782926,
+    "mean_rps_cal": 0.1286738130715905,
+    "mean_ll_raw": 1.260692478880002,
+    "mean_ll_cal": 1.2561235571048477
+  }
 }
