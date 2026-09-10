@@ -1,0 +1,8 @@
+{
+  "file": "j1_2026_2026-09-11.json",
+  "sha256": "a56cf7b2b675307b0c94f18949a2893791c98e4695824fd7cf8a8b20281b037f",
+  "stamped": true,
+  "ots_path": "j1_2026_2026-09-11.json.ots",
+  "upgraded": false,
+  "note": "OpenTimestamps commitment submitted to the public calendars. The attestation is incomplete until a Bitcoin block confirms it: run `ots upgrade` on the .ots a few hours later and re-commit the .ots only, never the prediction JSON (DESIGN_SITE.md 3.2)."
+}
