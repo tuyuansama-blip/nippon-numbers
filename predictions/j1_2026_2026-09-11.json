@@ -64,7 +64,18 @@
         "d": 0.27516505369808525,
         "a": 0.31154920120371843
       },
-      "result": null
+      "result": {
+        "fthg": 2.0,
+        "ftag": 1.0,
+        "ftr": "H",
+        "y": 0,
+        "rps_raw": 0.21670468559608722,
+        "rps_cal": 0.22064826083782682,
+        "ll_raw": 0.8718000385956302,
+        "ll_cal": 0.8836160485064013,
+        "source": "odds_api_provisional",
+        "fetched_at": "2026-09-11T17:28:33.359026+00:00"
+      }
     },
     {
       "event_id": "20e5e342bef4776fd004fc2db67147fd",
@@ -83,7 +94,18 @@
         "d": 0.2621399642245026,
         "a": 0.34431779589728573
       },
-      "result": null
+      "result": {
+        "fthg": 2.0,
+        "ftag": 3.0,
+        "ftr": "A",
+        "y": 2,
+        "rps_raw": 0.2966205961129577,
+        "rps_cal": 0.29239732367267657,
+        "ll_raw": 1.0764794219652567,
+        "ll_cal": 1.066190222789876,
+        "source": "odds_api_provisional",
+        "fetched_at": "2026-09-11T17:28:33.359026+00:00"
+      }
     },
     {
       "event_id": "614dde3eacd620b53feede86bdcb7e6b",
@@ -237,5 +259,14 @@
       },
       "result": null
     }
-  ]
+  ],
+  "round_summary": {
+    "n_matches": 10,
+    "n_resolved": 2,
+    "complete": false,
+    "mean_rps_raw": 0.25666264085452245,
+    "mean_rps_cal": 0.2565227922552517,
+    "mean_ll_raw": 0.9741397302804434,
+    "mean_ll_cal": 0.9749031356481387
+  }
 }
