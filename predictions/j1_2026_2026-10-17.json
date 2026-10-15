@@ -1,0 +1,241 @@
+{
+  "schema_version": 1,
+  "league": "jpn1",
+  "season": 2026,
+  "season_label": "2026-27",
+  "round_id": "2026-10-17",
+  "generated_at": "2026-10-15T07:58:04.604870+00:00",
+  "asof": "2026-10-15T07:57:53.353802+00:00",
+  "model_version": "footy-ev-phase2-dc-tb-v1",
+  "params_hash": "ea317b1dbde414553b28ff026b02ecdc2ba3b088e5d242b6cff416d721ed3f7f",
+  "params_hash_check": {
+    "ok": true,
+    "current": "ea317b1dbde414553b28ff026b02ecdc2ba3b088e5d242b6cff416d721ed3f7f",
+    "tag": null,
+    "expected": null,
+    "note": "no phase2-preregistered-* tag found -- gate inactive until the OOS-LEAGUES/J1 confirmation run (DESIGN_PHASE2.md 5) tags one"
+  },
+  "frozen_params_source": "data/frozen_params.json (tuned 2000-2011, 2026-08-20T16:48:27)",
+  "phi": {
+    "temperature": 0.9958643927512307,
+    "phi_home": -0.018369608066969727,
+    "phi_draw": -0.0038619024138390147,
+    "n_history": 3994,
+    "warm": true,
+    "as_of_fold": "2026-10-05 00:00:00"
+  },
+  "training_window": {
+    "n_matches": 1842,
+    "n_teams": 29,
+    "from_season": 2021
+  },
+  "odds_snapshot": {
+    "files": [
+      "j1_h2h_eu_20261015T051303Z.json"
+    ],
+    "sha256": {
+      "j1_h2h_eu_20261015T051303Z.json": "40431c9a9b7f820882abcf29f80718862315d72ef20cf7584d1847e71a5c7838"
+    },
+    "combined_sha256": "b682e6bdafd76d41a0bb5eefdd3855ef576299d5cb555b8c6a0d37fe052bb800"
+  },
+  "check": {
+    "ok": true,
+    "problems": []
+  },
+  "publish_gate": {
+    "ok": true,
+    "reasons": []
+  },
+  "matches": [
+    {
+      "event_id": "4beb457caf12f5ec6255f88c92599bcd",
+      "commence_time": "2026-10-17T04:00:00+00:00",
+      "home_team": "Shimizu S-Pulse",
+      "away_team": "Gamba Osaka",
+      "home_id": "jpn_1:shimizu_s_pulse",
+      "away_id": "jpn_1:gamba_osaka",
+      "p_raw": {
+        "h": 0.4008095295333857,
+        "d": 0.27148195429297606,
+        "a": 0.32770851617363833
+      },
+      "p_calibrated": {
+        "h": 0.39710906273004687,
+        "d": 0.2724649891445799,
+        "a": 0.33042594812537324
+      },
+      "result": null
+    },
+    {
+      "event_id": "55e66255890212d1fce8fd673181992f",
+      "commence_time": "2026-10-17T05:00:00+00:00",
+      "home_team": "Verdy",
+      "away_team": "FC Tokyo",
+      "home_id": "jpn_1:verdy",
+      "away_id": "jpn_1:fc_tokyo",
+      "p_raw": {
+        "h": 0.2711247589786607,
+        "d": 0.2938890857604781,
+        "a": 0.4349861552608613
+      },
+      "p_calibrated": {
+        "h": 0.26755831622840004,
+        "d": 0.29435997427603494,
+        "a": 0.4380817094955651
+      },
+      "result": null
+    },
+    {
+      "event_id": "258423cfe8d21ceccd01954595aaed8c",
+      "commence_time": "2026-10-17T05:00:00+00:00",
+      "home_team": "Sanfrecce Hiroshima",
+      "away_team": "Kyoto",
+      "home_id": "jpn_1:sanfrecce_hiroshima",
+      "away_id": "jpn_1:kyoto",
+      "p_raw": {
+        "h": 0.5676623104769143,
+        "d": 0.23348883725861644,
+        "a": 0.19884885226446933
+      },
+      "p_calibrated": {
+        "h": 0.5646438050194394,
+        "d": 0.23477346167567903,
+        "a": 0.20058273330488152
+      },
+      "result": null
+    },
+    {
+      "event_id": "1b96761f07feb5bfc7c5af72548886b8",
+      "commence_time": "2026-10-17T05:00:00+00:00",
+      "home_team": "Chiba",
+      "away_team": "Yokohama F. Marinos",
+      "home_id": "jpn_1:chiba",
+      "away_id": "jpn_1:yokohama_f_marinos",
+      "p_raw": {
+        "h": 0.20363174492622196,
+        "d": 0.21351157155747935,
+        "a": 0.5828566835162987
+      },
+      "p_calibrated": {
+        "h": 0.20031318377273322,
+        "d": 0.21314322466685762,
+        "a": 0.5865435915604091
+      },
+      "result": null
+    },
+    {
+      "event_id": "250360a01977413700e423479ed9537a",
+      "commence_time": "2026-10-17T06:00:00+00:00",
+      "home_team": "Cerezo Osaka",
+      "away_team": "Kawasaki Frontale",
+      "home_id": "jpn_1:cerezo_osaka",
+      "away_id": "jpn_1:kawasaki_frontale",
+      "p_raw": {
+        "h": 0.3692818903892024,
+        "d": 0.2267485906094501,
+        "a": 0.4039695190013476
+      },
+      "p_calibrated": {
+        "h": 0.36544802642566476,
+        "d": 0.22721301704643415,
+        "a": 0.407338956527901
+      },
+      "result": null
+    },
+    {
+      "event_id": "e359c8624276e21d23d77e422966bcb2",
+      "commence_time": "2026-10-17T06:00:00+00:00",
+      "home_team": "Kashima Antlers",
+      "away_team": "V-Varen Nagasaki",
+      "home_id": "jpn_1:kashima_antlers",
+      "away_id": "jpn_1:v_varen_nagasaki",
+      "p_raw": {
+        "h": 0.676172055402609,
+        "d": 0.1809190867650935,
+        "a": 0.14290885783229743
+      },
+      "p_calibrated": {
+        "h": 0.6739113797993287,
+        "d": 0.1819503121902595,
+        "a": 0.14413830801041166
+      },
+      "result": null
+    },
+    {
+      "event_id": "29b599ade270f544e36ee7c6cdb53ae0",
+      "commence_time": "2026-10-17T07:00:00+00:00",
+      "home_team": "Mito",
+      "away_team": "Urawa Reds",
+      "home_id": "jpn_1:mito",
+      "away_id": "jpn_1:urawa_reds",
+      "p_raw": {
+        "h": 0.38421507280027745,
+        "d": 0.2506694296261733,
+        "a": 0.3651154975735494
+      },
+      "p_calibrated": {
+        "h": 0.38044759300968345,
+        "d": 0.25139243401750844,
+        "a": 0.3681599729728081
+      },
+      "result": null
+    },
+    {
+      "event_id": "9fc8921981e5390c009be92520468591",
+      "commence_time": "2026-10-17T10:00:00+00:00",
+      "home_team": "Kashiwa Reysol",
+      "away_team": "Nagoya Grampus",
+      "home_id": "jpn_1:kashiwa_reysol",
+      "away_id": "jpn_1:nagoya_grampus",
+      "p_raw": {
+        "h": 0.5536517188507831,
+        "d": 0.23044792880374917,
+        "a": 0.21590035234546773
+      },
+      "p_calibrated": {
+        "h": 0.5505343416901111,
+        "d": 0.2316543043957275,
+        "a": 0.21781135391416137
+      },
+      "result": null
+    },
+    {
+      "event_id": "7b02b0abb300bc7f4c40e2c0037f0a54",
+      "commence_time": "2026-10-18T04:55:00+00:00",
+      "home_team": "Okayama",
+      "away_team": "Vissel Kobe",
+      "home_id": "jpn_1:okayama",
+      "away_id": "jpn_1:vissel_kobe",
+      "p_raw": {
+        "h": 0.27566907496225784,
+        "d": 0.2814691230425639,
+        "a": 0.44286180199517833
+      },
+      "p_calibrated": {
+        "h": 0.2720676642447857,
+        "d": 0.28187581059312455,
+        "a": 0.4460565251620899
+      },
+      "result": null
+    },
+    {
+      "event_id": "8f113b5a468a9eab8b8c3f94542cc939",
+      "commence_time": "2026-10-18T07:00:00+00:00",
+      "home_team": "Machida",
+      "away_team": "Avispa Fukuoka",
+      "home_id": "jpn_1:machida",
+      "away_id": "jpn_1:avispa_fukuoka",
+      "p_raw": {
+        "h": 0.5546325310212672,
+        "d": 0.25460565815433805,
+        "a": 0.19076181082439464
+      },
+      "p_calibrated": {
+        "h": 0.5515635708010911,
+        "d": 0.256067636416557,
+        "a": 0.19236879278235197
+      },
+      "result": null
+    }
+  ]
+}
